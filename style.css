@@ -221,7 +221,15 @@ body {
     background-color: #fff;
 }
 
-/* ... Row types ... */
+/* Row types - Visual hierarchy */
+.tree-node-row.node-chapter,
+.tree-node-row.node-subchapter {
+    font-weight: 600; /* Bold for chapters and subchapters */
+}
+
+.tree-node-row.node-item {
+    font-weight: 400; /* Normal weight for regular items */
+}
 
 /* Removed col-hierarchy styles */
 
