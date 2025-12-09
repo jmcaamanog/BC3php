@@ -1,3 +1,4 @@
+// 1. File Input Change
 const fileInput = document.getElementById('bc3file');
 if (fileInput) {
     fileInput.addEventListener('change', function (e) {
@@ -7,13 +8,23 @@ if (fileInput) {
     });
 }
 
+// 2. Search Box
+const searchInput = document.getElementById('searchTerm');
+if (searchInput) {
+    searchInput.addEventListener('input', function (e) {
+        const term = e.target.value.trim();
+        filterTree(term);
+    });
+}
+
+// 3. Upload Form Submit
 const uploadForm = document.getElementById('uploadForm');
 if (uploadForm) {
     uploadForm.addEventListener('submit', async function (e) {
         e.preventDefault();
-        const fileInput = document.getElementById('bc3file'); // Re-query or reuse if scope allows, reuse is fine if verified above but safer to check again inside or simple rely on it being there if form is there
+        const fileInput = document.getElementById('bc3file');
 
-        if (!fileInput || !fileInput.files.length) {
+        if (!fileInput.files.length) {
             alert("Por favor selecciona un archivo");
             return;
         }
@@ -160,7 +171,6 @@ function renderApp(data) {
         const header = document.createElement('div');
         header.className = 'tree-header';
         header.innerHTML = `
-            <div></div>
             <div>Código</div>
             <div>Ud</div>
             <div>Resumen</div>
@@ -171,6 +181,7 @@ function renderApp(data) {
         treeContainer.appendChild(header);
 
         const rootList = document.createElement('div');
+        rootList.className = 'tree-roots';
 
         // Ensure root_nodes is an array
         const roots = Array.isArray(data.root_nodes) ? data.root_nodes : Object.values(data.root_nodes);
@@ -182,9 +193,127 @@ function renderApp(data) {
         });
 
         treeContainer.appendChild(rootList);
+
+        // Re-apply filter if exists (e.g. re-processing same file or new file with text in search)
+        const searchTerm = document.getElementById('searchTerm').value.trim();
+        if (searchTerm) {
+            filterTree(searchTerm);
+        }
+
     } catch (e) {
         console.error(e);
         document.getElementById('stats').textContent += ' | ERROR RENDER: ' + e.message;
+    }
+}
+
+/**
+ * Filter the tree view based on search text
+ * @param {string} text 
+ */
+function filterTree(text) {
+    const rootContainer = document.getElementById('treeContent');
+    const nodes = rootContainer.querySelectorAll('.tree-node-container');
+    const lowerText = text.toLowerCase();
+
+    // Helper to get text content of a concept for searching
+    function getSearchContent(code) {
+        const c = parsedData.concepts[code];
+        if (!c) return '';
+        let str = c.code + ' ' + c.summary + ' ' + (c.description || '');
+        if (c.measurements && c.measurements.length) {
+            str += ' ' + c.measurements.map(m => (m.label || '') + ' ' + (m.units || '')).join(' ');
+        }
+        return str.toLowerCase();
+    }
+
+    // Pass 1: Mark matches
+    // We can't just iterate flat list easily because visual hierarchy matters.
+    // Actually, iterating DOM nodes depth-first or checking logic?
+    // Easiest: Recursive function acting on DOM nodes has issues if we select 'all' nodes flatly.
+    // Better: Select top-level nodes and recurse.
+
+    // Instead of complex DOM recursion, let's use the flat querySelectorAll but handle logic carefully?
+    // No, hierarchy matters: Parent visible if Child visible.
+
+    // Recursive approach on DOM structure:
+    function processElement(el) {
+        // el is .tree-node-container
+        const code = el.dataset.code;
+        const childrenContainer = el.querySelector('.tree-node-children');
+
+        let isMatch = false;
+
+        // 1. Check self
+        if (code && getSearchContent(code).includes(lowerText)) {
+            isMatch = true;
+        }
+
+        // 2. Check children
+        let childVisible = false;
+        if (childrenContainer) {
+            const children = childrenContainer.querySelectorAll(':scope > .tree-node-container');
+            children.forEach(child => {
+                if (processElement(child)) {
+                    childVisible = true;
+                }
+            });
+        }
+
+        // Decision
+        if (text === '') {
+            el.style.display = '';
+            // Optional: Collapse everything? Or leave as is. 
+            // Leaving as is allows user to clear search and see context.
+            return true;
+        }
+
+        if (isMatch || childVisible) {
+            el.style.display = '';
+            // If child matched, expand self
+            if (childVisible && childrenContainer) {
+                childrenContainer.classList.add('visible');
+                const toggle = el.querySelector('.toggle-icon');
+                if (toggle) toggle.classList.add('expanded');
+            }
+            return true;
+        } else {
+            el.style.display = 'none';
+            return false;
+        }
+    }
+
+    // Start with root nodes in the tree container (skipping header)
+    // The roots are inside a div (rootList) or directly appended?
+    // In renderApp: treeContainer.appendChild(rootList);
+    // rootList contains headers? No, header is separate.
+    // rootList contains createNode outputs.
+    // Actually renderApp does: 
+    // rootList = div
+    // rootList.appendChild(rootNode)
+
+    // So we need to select children of rootList.
+    // Since we don't have a distinct ID for rootList, let's just select .tree-node-container inside treeContent
+    // But `querySelectorAll` is flat.
+    // ...
+    // treeContainer.appendChild(rootList);
+
+    // We need top-level containers. 
+    // Let's modify renderApp to give rootList a class or ID, OR just use :scope > div > .tree-node-container?
+
+    // Re-reading renderApp:
+    // const rootList = document.createElement('div');
+    // rootList.className = 'tree-roots';
+    // ...
+    // treeContainer.appendChild(rootList);
+
+    const rootList = rootContainer.querySelector('.tree-roots');
+    if (rootList) {
+        const roots = rootList.children; // These are top level containers
+        Array.from(roots).forEach(root => {
+            if (root.classList.contains('tree-node-container')) {
+                processElement(root);
+            }
+        });
     }
 }
 
@@ -204,6 +333,7 @@ function createNode(code, isRoot = false, depth = 0, qty = 1) {
 
     const container = document.createElement('div');
     container.className = 'tree-node-container';
+    container.dataset.code = code;
 
     const row = document.createElement('div');
 
@@ -253,26 +383,36 @@ function createNode(code, isRoot = false, depth = 0, qty = 1) {
         row.classList.add('node-item');
     }
 
-    // 1. Column: Hierarchy Icon
-    const colHier = document.createElement('div');
-    colHier.className = 'col-hierarchy';
+    // 1. Column: Code (Merged with Hierarchy/Toggle)
+    const colCode = document.createElement('div');
+    colCode.className = 'col-code';
+    // Style applied in CSS (flex), but padding for depth here
+    colCode.style.paddingLeft = (depth * 20 + 8) + 'px';
 
     const toggle = document.createElement('span');
     toggle.className = 'toggle-icon';
     toggle.textContent = '▶';
-    toggle.style.opacity = hasChildren ? '1' : '0.1';
-
-    if (isRoot && hasChildren) {
-        toggle.classList.add('expanded');
+    // Hide if no children, but keep space? Or just opacity 0? 
+    // User said "remove column", if simple node, maybe no triangle at all?
+    // "ponerlos al lado del código".
+    // Usually leaves don't have arrows.
+    if (hasChildren) {
+        toggle.style.opacity = '1';
+        if (isRoot) toggle.classList.add('expanded');
+    } else {
+        toggle.style.opacity = '0'; // Invisible but keeps alignment if fixed width
+        // Or display none? If display none, text shifts left. Better to keep placeholder or use opacity.
+        // Let's use opacity 0 for alignment.
     }
 
-    colHier.appendChild(toggle);
+    colCode.appendChild(toggle);
 
-    // 2. Column: Code (Indented)
-    const colCode = document.createElement('div');
-    colCode.className = 'col-code';
-    colCode.textContent = concept.code.replace(/#+\s*$/, '');
-    colCode.style.paddingLeft = (depth * 20 + 8) + 'px';
+    // Code Text
+    const codeSpan = document.createElement('span');
+    codeSpan.textContent = concept.code.replace(/#+\s*$/, '');
+    colCode.appendChild(codeSpan);
+
+    // 2. Column: Unit
 
     // 3. Column: Unit
     const colUnit = document.createElement('div');
@@ -306,7 +446,7 @@ function createNode(code, isRoot = false, depth = 0, qty = 1) {
 
 
     // Append columns
-    row.appendChild(colHier);
+    // No colHier anymore
     row.appendChild(colCode);
     row.appendChild(colUnit);
     row.appendChild(colSummary);
@@ -316,18 +456,21 @@ function createNode(code, isRoot = false, depth = 0, qty = 1) {
 
     // Click handlers
     row.onclick = (e) => {
+        // Prevent triggering if we clicked a link or input (just in case)
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'A') return;
+
+        // Select
         document.querySelectorAll('.tree-node-row').forEach(el => el.classList.remove('active'));
         row.classList.add('active');
         showDetails(code);
-    };
 
-    // Toggle handler
-    if (hasChildren) {
-        toggle.onclick = (e) => {
-            e.stopPropagation();
+        // Toggle Expand/Collapse
+        if (hasChildren) {
             const childrenContainer = container.querySelector('.tree-node-children');
             if (childrenContainer) {
-                if (childrenContainer.classList.contains('visible')) {
+                const isVisible = childrenContainer.classList.contains('visible');
+
+                if (isVisible) {
                     childrenContainer.classList.remove('visible');
                     toggle.classList.remove('expanded');
                 } else {
@@ -335,9 +478,8 @@ function createNode(code, isRoot = false, depth = 0, qty = 1) {
                     toggle.classList.add('expanded');
                 }
             }
-        };
-        // Also toggle on double click of row? Optional.
-    }
+        }
+    };
 
     container.appendChild(row);
 

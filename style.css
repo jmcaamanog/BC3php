@@ -141,8 +141,30 @@ body {
     /* Scroll is here */
     display: block;
     /* Flex might cause issues with sticky if not careful, but block is safer for list */
-    height: 100%;
-    /* Force height to match parent */
+    /* Height is now flex-managed */
+}
+
+/* Search Bar */
+.search-bar-container {
+    padding: 0.5rem 1rem;
+    background-color: var(--bg-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.search-bar-container input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.search-bar-container input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.1);
 }
 
 /* Remove Details Panel styles (or hide them) */
@@ -159,16 +181,15 @@ body {
 .tree-header {
     display: grid;
     /* 
-       Updated Layout:
-       Icon: 40px
-       Code: 150px
+       Updated Layout (Merged Hierarchy):
+       Code: 190px (Includes indent and icon)
        Unit: 40px
        Summary: 1fr
        Quantity: 80px
        Price: 110px
        Amount: 110px
     */
-    grid-template-columns: 40px 150px 40px 1fr 80px 150px 150px;
+    grid-template-columns: 190px 40px 1fr 80px 150px 150px;
     background-color: var(--table-header-bg);
     border-bottom: 1px solid var(--border-color);
     position: sticky;
@@ -185,27 +206,12 @@ body {
     position: relative;
 }
 
-/* Column Resize Handle */
-.resize-handle {
-    position: absolute;
-    right: 0;
-    top: 0;
-    width: 5px;
-    height: 100%;
-    cursor: col-resize;
-    background: transparent;
-    z-index: 20;
-}
-
-.resize-handle:hover,
-.resize-handle.resizing {
-    background-color: var(--accent);
-}
+/* ... resize handle ... */
 
 /* Grid Tree Node */
 .tree-node-row {
     display: grid;
-    grid-template-columns: 40px 150px 40px 1fr 80px 150px 150px;
+    grid-template-columns: 190px 40px 1fr 80px 150px 150px;
     align-items: center;
     border-bottom: 1px solid var(--table-border);
     cursor: pointer;
@@ -215,44 +221,23 @@ body {
     background-color: #fff;
 }
 
-/* Row types */
-.tree-node-row.node-chapter {
-    font-weight: 700;
-    color: var(--text-primary);
-    background-color: #f8fafc;
-    /* Subtle distinguish for chapters */
-}
+/* ... Row types ... */
 
-.tree-node-row.node-item {
-    font-weight: 400;
-    color: #2563eb;
-    /* Blue 600 */
-}
+/* Removed col-hierarchy styles */
 
-.tree-node-row.node-subchapter {
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.tree-node-row:hover {
-    background-color: var(--hover-bg);
-}
-
-.tree-node-row.active {
-    background-color: #e0f2fe;
-    /* Light sky */
-    color: var(--text-primary);
-}
-
-.col-hierarchy {
-    padding: 4px 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+.col-code {
+    padding: 4px 8px;
     border-right: 1px solid var(--table-border);
+    white-space: nowrap;
+    overflow: hidden;
+    /* Might clip long codes if deeply indented, but text-overflow helps */
+    text-overflow: ellipsis;
+    font-family: inherit;
+    display: flex;
+    /* Flex to align icon and text */
+    align-items: center;
 }
 
-.col-code,
 .col-unit,
 .col-quantity,
 .col-price,
