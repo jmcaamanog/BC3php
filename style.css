@@ -1,0 +1,368 @@
+:root {
+    --bg-color: #ffffff;
+    --sidebar-bg: #f8fafc;
+    --card-bg: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --accent: #0ea5e9;
+    /* Sky 500 */
+    --accent-hover: #0284c7;
+    /* Sky 600 */
+    --border-color: #cbd5e1;
+    /* Slate 300 */
+    --success: #22c55e;
+    --table-header-bg: #f1f5f9;
+    --table-border: #e2e8f0;
+    --hover-bg: #f1f5f9;
+}
+
+* {
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+body {
+    margin: 0;
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Header */
+.main-header {
+    background-color: var(--bg-color);
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 70px;
+}
+
+.logo {
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: var(--accent);
+}
+
+.upload-area form {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.upload-btn {
+    background-color: #fff;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    border: 1px solid var(--border-color);
+    min-width: 200px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.upload-btn:hover {
+    background-color: var(--hover-bg);
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.process-btn {
+    background-color: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 0.5rem 1.5rem;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.process-btn:hover {
+    background-color: var(--accent-hover);
+}
+
+.project-info {
+    text-align: right;
+}
+
+.project-info h1 {
+    font-size: 0.9rem;
+    margin: 0;
+    font-weight: 500;
+}
+
+.project-info .meta {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Main Content Area */
+.content-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--bg-color);
+    min-height: 0;
+    /* Critical for nested flex scrolling */
+}
+
+/* Tree Panel takes full height now */
+.tree-panel {
+    flex: 1;
+    overflow: hidden;
+    /* Remove scroll from parent */
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    /* Critical for nested flex scrolling */
+}
+
+#treeContent {
+    flex: 1;
+    overflow-y: auto;
+    /* Scroll is here */
+    display: block;
+    /* Flex might cause issues with sticky if not careful, but block is safer for list */
+    height: 100%;
+    /* Force height to match parent */
+}
+
+/* Remove Details Panel styles (or hide them) */
+.details-panel {
+    display: none !important;
+}
+
+/* Divider removal */
+.divider-horizontal {
+    display: none !important;
+}
+
+/* Tree Grid Headers */
+.tree-header {
+    display: grid;
+    /* 
+       Updated Layout:
+       Icon: 40px
+       Code: 150px
+       Unit: 40px
+       Summary: 1fr
+       Quantity: 80px
+       Price: 110px
+       Amount: 110px
+    */
+    grid-template-columns: 40px 150px 40px 1fr 80px 150px 150px;
+    background-color: var(--table-header-bg);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.tree-header div {
+    padding: 8px 12px;
+    border-right: 1px solid var(--border-color);
+    position: relative;
+}
+
+/* Column Resize Handle */
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 20;
+}
+
+.resize-handle:hover,
+.resize-handle.resizing {
+    background-color: var(--accent);
+}
+
+/* Grid Tree Node */
+.tree-node-row {
+    display: grid;
+    grid-template-columns: 40px 150px 40px 1fr 80px 150px 150px;
+    align-items: center;
+    border-bottom: 1px solid var(--table-border);
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    background-color: #fff;
+}
+
+/* Row types */
+.tree-node-row.node-chapter {
+    font-weight: 700;
+    color: var(--text-primary);
+    background-color: #f8fafc;
+    /* Subtle distinguish for chapters */
+}
+
+.tree-node-row.node-item {
+    font-weight: 400;
+    color: #2563eb;
+    /* Blue 600 */
+}
+
+.tree-node-row.node-subchapter {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.tree-node-row:hover {
+    background-color: var(--hover-bg);
+}
+
+.tree-node-row.active {
+    background-color: #e0f2fe;
+    /* Light sky */
+    color: var(--text-primary);
+}
+
+.col-hierarchy {
+    padding: 4px 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-right: 1px solid var(--table-border);
+}
+
+.col-code,
+.col-unit,
+.col-quantity,
+.col-price,
+.col-amount {
+    padding: 4px 8px;
+    border-right: 1px solid var(--table-border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: inherit;
+}
+
+.col-summary {
+    padding: 4px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid var(--table-border);
+}
+
+.col-quantity,
+.col-price,
+.col-amount {
+    text-align: right;
+}
+
+.col-amount {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tree-node-children {
+    display: none;
+    flex-direction: column;
+}
+
+.tree-node-children.visible {
+    display: flex;
+}
+
+/* Measurement Table Styles */
+.measurements-container {
+    padding: 10px 20px 10px 40px;
+    background-color: #f8fafc;
+    /* Light gray background for details */
+    border-bottom: 1px solid var(--border-color);
+    overflow-x: auto;
+}
+
+.measurements-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background-color: #fff;
+    border: 1px solid var(--border-color);
+}
+
+.measurements-table th,
+.measurements-table td {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    text-align: left;
+}
+
+.measurements-table th {
+    background-color: var(--table-header-bg);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.measurements-table td.numeric {
+    text-align: right;
+    font-family: inherit;
+}
+
+.measurements-table tr.total-row td {
+    background-color: var(--table-header-bg);
+    font-weight: 700;
+    color: var(--text-primary);
+    border-top: 2px solid var(--border-color);
+}
+
+/* Empty State */
+.empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-secondary);
+    font-style: italic;
+    background-color: var(--bg-color);
+}
+
+/* Description Row handled by JS inline styles currently, 
+   but preserved comment for future refactoring */
+
+/* Toggle Icon */
+.toggle-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    text-align: center;
+    transition: transform 0.2s;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.toggle-icon.expanded {
+    transform: rotate(90deg);
+}
