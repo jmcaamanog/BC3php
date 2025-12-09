@@ -1,48 +1,54 @@
-document.getElementById('bc3file').addEventListener('change', function (e) {
-    if (this.files && this.files.length > 0) {
-        document.getElementById('fileName').textContent = this.files[0].name;
-    }
-});
+const fileInput = document.getElementById('bc3file');
+if (fileInput) {
+    fileInput.addEventListener('change', function (e) {
+        if (this.files && this.files.length > 0) {
+            document.getElementById('fileName').textContent = this.files[0].name;
+        }
+    });
+}
 
-document.getElementById('uploadForm').addEventListener('submit', async function (e) {
-    e.preventDefault();
-    const fileInput = document.getElementById('bc3file');
+const uploadForm = document.getElementById('uploadForm');
+if (uploadForm) {
+    uploadForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const fileInput = document.getElementById('bc3file'); // Re-query or reuse if scope allows, reuse is fine if verified above but safer to check again inside or simple rely on it being there if form is there
 
-    if (!fileInput.files.length) {
-        alert("Por favor selecciona un archivo");
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('bc3file', fileInput.files[0]);
-
-    const btn = this.querySelector('.process-btn');
-    const originalText = btn.textContent;
-    btn.textContent = 'Procesando...';
-    btn.disabled = true;
-
-    try {
-        const response = await fetch('upload.php', {
-            method: 'POST',
-            body: formData
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            renderApp(result.data);
-        } else {
-            alert('Error: ' + (result.error || 'Unknown error'));
+        if (!fileInput || !fileInput.files.length) {
+            alert("Por favor selecciona un archivo");
+            return;
         }
 
-    } catch (err) {
-        console.error(err);
-        alert('Error procesando el archivo');
-    } finally {
-        btn.textContent = originalText;
-        btn.disabled = false;
-    }
-});
+        const formData = new FormData();
+        formData.append('bc3file', fileInput.files[0]);
+
+        const btn = this.querySelector('.process-btn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Procesando...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch('upload.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                renderApp(result.data);
+            } else {
+                alert('Error: ' + (result.error || 'Unknown error'));
+            }
+
+        } catch (err) {
+            console.error(err);
+            alert('Error procesando el archivo');
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    });
+}
 
 let parsedData = null;
 
@@ -121,7 +127,9 @@ function renderApp(data) {
     const owner = document.getElementById('projectOwner');
 
     // Try to find a good title. Usually from ~V properties or root node.
-    title.textContent = data.properties.description || (data.properties.owner + ' Project');
+    // Improve title display by removing trailing # if present
+    const rawTitle = data.properties.description || (data.properties.owner + ' Project');
+    title.textContent = rawTitle.replace(/#+\s*$/, '');
 
     // Display metadata
     const metaText = [
@@ -263,7 +271,7 @@ function createNode(code, isRoot = false, depth = 0, qty = 1) {
     // 2. Column: Code (Indented)
     const colCode = document.createElement('div');
     colCode.className = 'col-code';
-    colCode.textContent = concept.code;
+    colCode.textContent = concept.code.replace(/#+\s*$/, '');
     colCode.style.paddingLeft = (depth * 20 + 8) + 'px';
 
     // 3. Column: Unit
@@ -460,7 +468,7 @@ function showDetails(code) {
     emptyState.style.display = 'none';
     panel.style.display = 'block';
 
-    document.getElementById('detCode').textContent = concept.code;
+    document.getElementById('detCode').textContent = concept.code.replace(/#+\s*$/, '');
     document.getElementById('detSummary').textContent = concept.summary;
     document.getElementById('detPrice').textContent = parseFloat(concept.price).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -484,7 +492,7 @@ function showDetails(code) {
             totalCalc += total;
 
             row.innerHTML = `
-                <td>${item.code}</td>
+                <td>${item.code.replace(/#+\s*$/, '')}</td>
                 <td>${factor.toLocaleString('es-ES')} ${childNode ? childNode.unit : ''}</td>
                 <td>${childNode ? childNode.summary : '???'}</td>
                 <td>${childPrice.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
