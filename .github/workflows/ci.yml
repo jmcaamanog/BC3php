@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-php:
+    name: PHP syntax check
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        php-version: ["8.1", "8.2", "8.3"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ matrix.php-version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          tools: cs2pr
+
+      - name: Check PHP syntax (parallel-lint)
+        run: |
+          composer global require --no-progress php-parallel-lint/php-parallel-lint
+          ~/.composer/vendor/bin/parallel-lint --checkstyle . | cs2pr
+
+  lint-js:
+    name: JavaScript lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check JS syntax
+        run: node --check app.js
+
+  smoke-test:
+    name: Smoke test — parse sample BC3
+    runs-on: ubuntu-latest
+    needs: lint-php
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+
+      - name: Run smoke test
+        run: php -r "
+          require 'BC3Parser.php';
+          \$files = glob('*.bc3') ?: [];
+          if (empty(\$files)) {
+            echo 'No .bc3 fixtures found — skipping parse test.' . PHP_EOL;
+            exit(0);
+          }
+          foreach (\$files as \$f) {
+            \$p = new BC3Parser(\$f);
+            \$data = \$p->parse();
+            echo 'OK: ' . \$f . PHP_EOL;
+          }
+        "
