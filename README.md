@@ -133,6 +133,20 @@ Añade estos elementos a tu página:
 - PHP 7.4+ con extensión `mbstring`
 - Ninguna dependencia JavaScript externa
 
+## Creado por
+
+SmartCalc es una herramienta creada por System Arquitectura, empresa con sede en Málaga especializada en proyectos de arquitectura industrial, logística, corporativa y residencial.
+
+Su enfoque combina diseño, tecnología y sostenibilidad desde las fases tempranas del proyecto, con una visión técnica y estratégica orientada a mejorar el rendimiento de las organizaciones y su relación con el entorno.
+
 ## Licencia
 
-MIT
+Este proyecto se distribuye bajo la licencia GNU Affero General Public License v3.0 (AGPLv3).
+
+## Autor
+
+- LinkedIn: https://www.linkedin.com/in/rafaroa/
+- Blog: https://rafarq.com
+- Podcast: https://rafarq.com/podcast
+- X: https://x.com/rafaelroa
+- Instagram: https://www.instagram.com/r4f4r04/
