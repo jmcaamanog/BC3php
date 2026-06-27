@@ -135,7 +135,7 @@ Añade estos elementos a tu página:
 
 ## Creado por
 
-BC3php es una herramienta creada por System Arquitectura, empresa con sede en Málaga especializada en proyectos de arquitectura industrial, logística, corporativa y residencial.
+BC3php es una herramienta creada por [System Arquitectura](https://www.systemarquitectura.com), empresa con sede en Málaga especializada en proyectos de arquitectura industrial, logística, corporativa y residencial.
 
 Su enfoque combina diseño, tecnología y sostenibilidad desde las fases tempranas del proyecto, con una visión técnica y estratégica orientada a mejorar el rendimiento de las organizaciones y su relación con el entorno.
 
