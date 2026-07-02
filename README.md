@@ -3,6 +3,8 @@
 Visualizador web avanzado de archivos BC3 (FIEBDC-3) para presupuestos de construccion.
 **Mejora libre y gratuita para cualquier Arquitecto Tecnico, Arquitecto o profesional de la construccion by JMC.**
 
+hecha un vistazo a las capturas en la carpeta ---> **CAPTURAS**.
+
 ---
 
 ## Creditos y Origen
