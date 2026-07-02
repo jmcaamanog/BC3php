@@ -93,7 +93,8 @@ class BC3Parser
         return [
             'properties' => $this->properties,
             'concepts' => $this->concepts,
-            'root_nodes' => $this->getRootNodes()
+            'root_nodes' => $this->getRootNodes(),
+            'original_text' => $content
         ];
     }
 
@@ -146,12 +147,17 @@ class BC3Parser
         if (!$code)
             return;
 
+        $priceRaw = $parts[3] ?? '0';
+        $price = floatval(str_replace(',', '.', $priceRaw));
+        $type = intval($parts[5] ?? 0);
+
         $this->concepts[$code] = [
             'code' => $code,
             'unit' => $parts[1] ?? '',
             'summary' => $parts[2] ?? '',
-            'price' => $parts[3] ?? 0,
+            'price' => $price,
             'date' => $parts[4] ?? '', // Concept date
+            'type' => $type,
             'children' => [],
             'decomposition' => [], // For ~D
             'description' => '' // For ~T
@@ -333,16 +339,40 @@ class BC3Parser
             if (strlen($childCode) === 0 || $childCode === '|')
                 continue;
 
-            // Slot 2
+            // Slot 2: Factor
             $factor1Raw = $items[$i + 1] ?? '';
-            // Slot 3
+            // Slot 3: Rendimiento o Tipo
             $factor2Raw = $items[$i + 2] ?? '';
 
-            $f1 = ($factor1Raw === '') ? 1.0 : floatval(str_replace(',', '.', $factor1Raw));
-            $f2 = ($factor2Raw === '') ? 1.0 : floatval(str_replace(',', '.', $factor2Raw));
+            // Determinar el factor real.
+            // Si el segundo campo tiene valor, lo usamos. Si no, si el primer campo tiene valor, lo usamos.
+            // Esto da soporte a formatos con dobles barras como mo001\\3.62
+            $f1 = ($factor1Raw === '') ? null : floatval(str_replace(',', '.', $factor1Raw));
+            $f2 = ($factor2Raw === '') ? null : floatval(str_replace(',', '.', $factor2Raw));
+            
+            $factor = 1.0;
+            if ($f2 !== null) {
+                $factor = $f2;
+            } elseif ($f1 !== null) {
+                $factor = $f1;
+            }
 
-            // Combined factor
-            $factor = $f1 * $f2;
+            // El tipo de recurso se lee principalmente desde la definición del concepto,
+            // pero si no se encuentra, podemos deducirlo por el prefijo del código del elemento hijo.
+            $type = 0;
+            if (isset($this->concepts[$childCode])) {
+                $type = $this->concepts[$childCode]['type'] ?? 0;
+            }
+            if ($type === 0) {
+                $lowerCode = strtolower($childCode);
+                if (strpos($lowerCode, 'mo') === 0 || strpos($lowerCode, 'mano') === 0) {
+                    $type = 1;
+                } elseif (strpos($lowerCode, 'mq') === 0 || strpos($lowerCode, 'maq') === 0) {
+                    $type = 2;
+                } elseif (strpos($lowerCode, 'mt') === 0 || strpos($lowerCode, 'mat') === 0) {
+                    $type = 3;
+                }
+            }
 
             // Advance index by 2 (so loop increments by 1 total 3)
             $i += 2;
@@ -350,7 +380,8 @@ class BC3Parser
             $this->concepts[$parentCode]['children'][] = $childCode;
             $this->concepts[$parentCode]['decomposition'][] = [
                 'code' => $childCode,
-                'factor' => $factor
+                'factor' => $factor,
+                'type' => $type
             ];
         }
     }

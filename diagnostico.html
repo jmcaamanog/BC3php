@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Diagnostico Export</title>
+</head>
+<body>
+<h2>Diagnostico de Librerias de Exportacion (LOCAL)</h2>
+<div id="status" style="font-family:monospace;background:#f0f0f0;padding:20px;white-space:pre-wrap;min-height:100px;border:1px solid #ccc;">Cargando...</div>
+<button onclick="testPdf()" style="margin:10px;padding:10px 20px;font-size:16px;">Test PDF</button>
+<button onclick="testExcel()" style="margin:10px;padding:10px 20px;font-size:16px;">Test Excel</button>
+
+<script src="jspdf.umd.min.js"></script>
+<script src="jspdf.plugin.autotable.min.js"></script>
+<script src="xlsx.full.min.js"></script>
+
+<script>
+var statusEl = document.getElementById("status");
+function log(msg) { statusEl.textContent += "\n" + msg; console.log(msg); }
+
+statusEl.textContent = "Scripts cargados. Comprobando...";
+
+try {
+    log("window.jspdf: " + (typeof window.jspdf));
+    log("window.jspdf.jsPDF: " + (window.jspdf ? typeof window.jspdf.jsPDF : "N/A"));
+    log("window.jsPDF: " + (typeof window.jsPDF));
+    log("window.XLSX: " + (typeof window.XLSX));
+    if (window.jspdf && window.jspdf.jsPDF) {
+        var doc = new window.jspdf.jsPDF();
+        log("new jsPDF() OK");
+        log("doc.autoTable: " + (typeof doc.autoTable === "function" ? "OK" : "NO DISPONIBLE"));
+    }
+    log("=== Diagnostico completado ===");
+} catch(e) { log("ERROR: " + e.message); }
+
+function testPdf() {
+    try {
+        var JsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : window.jsPDF;
+        if (!JsPDF) { log("ERROR: jsPDF no disponible"); return; }
+        var doc = new JsPDF();
+        doc.text("Prueba PDF - Exportacion BC3", 20, 20);
+        if (typeof doc.autoTable === "function") {
+            doc.autoTable({ head: [["Codigo","Descripcion","Precio"]], body: [["CAP01","Capitulo prueba","1000"]] });
+        }
+        doc.save("test_exportacion.pdf");
+        log("PDF generado - comprueba tus descargas");
+    } catch(e) { log("ERROR PDF: " + e.message); }
+}
+
+function testExcel() {
+    try {
+        if (typeof XLSX === "undefined") { log("ERROR: XLSX no disponible"); return; }
+        var wb = XLSX.utils.book_new();
+        var ws = XLSX.utils.aoa_to_sheet([["Codigo","Descripcion","Precio"],["CAP01","Capitulo prueba",1000]]);
+        XLSX.utils.book_append_sheet(wb, ws, "Presupuesto");
+        XLSX.writeFile(wb, "test_exportacion.xlsx");
+        log("Excel generado - comprueba tus descargas");
+    } catch(e) { log("ERROR Excel: " + e.message); }
+}
+</script>
+</body>
+</html>

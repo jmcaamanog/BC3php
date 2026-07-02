@@ -1,0 +1,12 @@
+~V|Jose Manuel Caamaño|FIEBDC-3/2016|Antigravity|Presupuesto de Prueba|UTF-8|
+~C|01#|ud|CAPITULO DE PRUEBA|0,00|20260702|0|
+~C|01.01|m2|Partida de Excavacion|12,50|20260702|0|
+~C|01.02|ud|Partida Compuesta|0,00|20260702|0|
+~C|DEH040|h|Oficial de primera|18,20|20260702|1|
+~C|MAT001|kg|Acero corrugado|1,35|20260702|3|
+~D|01#|01.01\1.0\0\01.02\1.0\0\
+~D|01.02|DEH040\1.5\1\MAT001\10.0\3\
+~T|01.01|Partida simple de excavacion manual en terreno semiduro.
+~T|01.02|Partida compuesta que contiene mano de obra y materiales.
+~M|01#\01.01|1\1\1\1\|10.0|
+\Edificio Principal\1\10.00\\1.00\
