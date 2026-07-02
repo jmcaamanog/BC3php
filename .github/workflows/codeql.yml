@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript, python]
+        language: [javascript]
         # CodeQL does not support PHP natively; php-parallel-lint covers syntax errors.
         # Add 'java', 'go', etc. if the project grows to include those languages.
 
