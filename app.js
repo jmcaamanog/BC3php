@@ -186,6 +186,7 @@ function renderCurrentLevel() {
     if (!parsedData) return;
 
     const treeContainer = document.getElementById('treeContent');
+    if (!treeContainer) return;
     treeContainer.innerHTML = '';
 
     // Add mobile class if in mobile mode
@@ -250,7 +251,7 @@ function renderCurrentLevel() {
     treeContainer.appendChild(rootList);
 
     // Re-apply filter if exists
-    const searchTerm = document.getElementById('searchTerm').value.trim();
+    const searchTerm = (document.getElementById('searchTerm')?.value || '').trim();
     if (searchTerm) {
         filterTree(searchTerm);
     }
@@ -2055,6 +2056,10 @@ function calculateCompareStats() {
     if (modCountEl) modCountEl.textContent = modifiedCount;
 }
 
+function getActiveFilterValue(id) {
+    return document.getElementById(id)?.value || 'all';
+}
+
 // 6. Filtros: Comprobación de visibilidad de nodos y expansión
 function shouldShowNode(code) {
     if (!parsedData) return true;
@@ -2067,7 +2072,7 @@ function shouldShowNode(code) {
     }
 
     // Filtro por Importe
-    const costFilterVal = document.getElementById('costFilter').value;
+    const costFilterVal = getActiveFilterValue('costFilter');
     if (costFilterVal !== 'all') {
         const limit = parseFloat(costFilterVal);
         const price = parseFloat(concept.price) || 0;
@@ -2077,7 +2082,7 @@ function shouldShowNode(code) {
     }
 
     // Filtro por Tipo de Recurso
-    const resourceFilterVal = document.getElementById('resourceFilter').value;
+    const resourceFilterVal = getActiveFilterValue('resourceFilter');
     if (resourceFilterVal !== 'all') {
         if (concept.decomposition && concept.decomposition.length > 0) {
             const hasResourceType = concept.decomposition.some(item => {
@@ -2103,8 +2108,8 @@ function hasVisibleChildren(code) {
     const isChapter = concept.code.endsWith('#') || concept.is_root;
     if (!isChapter) {
         // Para nodos hoja (partidas), validamos el filtro en sí
-        const costFilterVal = document.getElementById('costFilter').value;
-        const resourceFilterVal = document.getElementById('resourceFilter').value;
+        const costFilterVal = getActiveFilterValue('costFilter');
+        const resourceFilterVal = getActiveFilterValue('resourceFilter');
         if (costFilterVal === 'all' && resourceFilterVal === 'all') return true;
 
         const price = parseFloat(concept.price) || 0;
