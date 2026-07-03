@@ -22,6 +22,55 @@
     scrollbar-color: #cbd5e1 transparent;
 }
 
+.ui-icon {
+    width: 1em;
+    height: 1em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    vertical-align: -0.125em;
+}
+
+.ui-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+button .ui-icon,
+.planning-modal-title .ui-icon {
+    margin-right: 0.4rem;
+}
+
+button .trailing-icon {
+    margin-right: 0;
+    margin-left: 0.25rem;
+}
+
+button[data-icon],
+button[data-icon-only] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+}
+
+button[data-icon-only] .ui-icon {
+    margin-right: 0;
+}
+
+[data-icon],
+[data-icon-only],
+.toggle-icon,
+.gantt-toggle {
+    align-items: center;
+}
+
 body {
     margin: 0;
     font-family: 'Inter', sans-serif;
@@ -360,11 +409,11 @@ body {
 
 /* Toggle Icon */
 .toggle-icon {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 20px;
     height: 20px;
-    line-height: 20px;
-    text-align: center;
     transition: transform 0.2s;
     font-size: 0.8rem;
     cursor: pointer;
@@ -714,6 +763,7 @@ body {
 .drag-overlay-icon {
     font-size: 3rem;
     margin-bottom: 1rem;
+    color: var(--accent);
 }
 .drag-overlay-text {
     font-size: 1.25rem;
@@ -1314,6 +1364,8 @@ body.dark-theme .dev-down {
     font-size: 1rem;
     font-weight: 700;
     letter-spacing: 0.5px;
+    display: inline-flex;
+    align-items: center;
 }
 .planning-controls {
     display: flex;
@@ -1461,14 +1513,19 @@ body.dark-theme .dev-down {
 .dark-mode .gantt-depth-1 { background: #1e2d3d; color: #90caf9; }
 
 .gantt-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     font-size: 0.65rem;
     color: var(--text-secondary);
     user-select: none;
     width: 14px;
+    height: 14px;
     flex-shrink: 0;
     transition: transform 0.15s;
 }
+.gantt-toggle.expanded { transform: rotate(90deg); }
 .gantt-toggle:hover { color: var(--accent); }
 .gantt-toggle-spacer { width: 14px; flex-shrink: 0; }
 .gantt-task-name {
@@ -1624,4 +1681,3 @@ body.dark-theme .dev-down {
 .dark-mode .gantt-bg-cell { border-right-color: #334155; }
 .dark-mode .gantt-bar-row { border-bottom-color: #334155; }
 .dark-mode .gantt-week-cell { border-right-color: #334155; color: #94a3b8; }
-
