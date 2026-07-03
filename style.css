@@ -8,6 +8,9 @@
     /* Sky 500 */
     --accent-hover: #0284c7;
     /* Sky 600 */
+    --accent-contrast: #ffffff;
+    --link-color: #0369a1;
+    --link-hover: #075985;
     --border-color: #cbd5e1;
     /* Slate 300 */
     --success: #22c55e;
@@ -80,6 +83,28 @@ body {
     overflow: hidden;
 }
 
+a {
+    color: var(--link-color);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+a:hover,
+a:focus-visible {
+    color: var(--link-hover);
+    text-decoration: none;
+}
+
+button {
+    font-family: inherit;
+    color: inherit;
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
 .app-container {
     display: flex;
     flex-direction: column;
@@ -133,7 +158,7 @@ body {
 
 .process-btn {
     background-color: var(--accent);
-    color: #fff;
+    color: var(--accent-contrast);
     border: none;
     padding: 0.5rem 1.5rem;
     border-radius: 6px;
@@ -436,7 +461,7 @@ body {
 
 .breadcrumb-back {
     background-color: var(--accent);
-    color: white;
+    color: var(--accent-contrast);
     border: none;
     padding: 0.5rem 1rem;
     border-radius: 6px;
@@ -469,7 +494,7 @@ body {
 
 .breadcrumb-item:hover {
     color: var(--accent-hover);
-    text-decoration: underline;
+    text-decoration: none;
 }
 
 .breadcrumb-separator {
@@ -665,6 +690,7 @@ body {
 .theme-toggle-btn {
     background: none;
     border: 1px solid var(--border-color);
+    color: var(--text-primary);
     font-size: 1.1rem;
     cursor: pointer;
     padding: 0.5rem;
@@ -790,6 +816,9 @@ body.dark-theme {
     --text-secondary: #94a3b8;
     --accent: #38bdf8;
     --accent-hover: #7dd3fc;
+    --accent-contrast: #082f49;
+    --link-color: #7dd3fc;
+    --link-hover: #bae6fd;
     --border-color: #334155;
     --table-header-bg: #1e293b;
     --table-border: #334155;
@@ -863,6 +892,19 @@ body.dark-theme .app-footer {
     background-color: #1e293b;
     border-top: 1px solid #334155;
     color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+    .app-footer {
+        height: auto;
+        min-height: 40px;
+        padding: 0.4rem 0.75rem;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.15rem;
+        text-align: center;
+        line-height: 1.25;
+    }
 }
 
 /* ==========================================================================
@@ -1029,6 +1071,10 @@ body.dark-theme .pec-total {
 .filter-btn:hover {
     background-color: var(--hover-bg);
     border-color: var(--text-secondary);
+}
+.filter-btn:disabled {
+    color: var(--text-secondary);
+    border-color: var(--border-color);
 }
 .filter-select {
     background-color: var(--bg-color);
@@ -1510,7 +1556,7 @@ body.dark-theme .dev-down {
     padding-left: 40px;
     color: var(--text-secondary);
 }
-.dark-mode .gantt-depth-1 { background: #1e2d3d; color: #90caf9; }
+body.dark-theme .gantt-depth-1 { background: #1e2d3d; color: #90caf9; }
 
 .gantt-toggle {
     display: inline-flex;
@@ -1675,9 +1721,9 @@ body.dark-theme .dev-down {
 .gantt-resize-r { border-radius: 0 4px 4px 0; }
 
 /* Dark mode adaptations */
-.dark-mode .gantt-left-col { border-right-color: #334155; }
-.dark-mode .gantt-depth-1 { background: #1e293b; }
-.dark-mode .gantt-name-row:hover { background: #1e293b; }
-.dark-mode .gantt-bg-cell { border-right-color: #334155; }
-.dark-mode .gantt-bar-row { border-bottom-color: #334155; }
-.dark-mode .gantt-week-cell { border-right-color: #334155; color: #94a3b8; }
+body.dark-theme .gantt-left-col { border-right-color: #334155; }
+body.dark-theme .gantt-depth-1 { background: #1e293b; }
+body.dark-theme .gantt-name-row:hover { background: #1e293b; }
+body.dark-theme .gantt-bg-cell { border-right-color: #334155; }
+body.dark-theme .gantt-bar-row { border-bottom-color: #334155; }
+body.dark-theme .gantt-week-cell { border-right-color: #334155; color: #94a3b8; }

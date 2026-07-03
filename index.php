@@ -26,7 +26,6 @@ header("Pragma: no-cache");
                         <span id="fileName">Seleccionar archivo .bc3</span>
                         <input type="file" id="bc3file" name="bc3file" accept=".bc3" hidden>
                     </label>
-                    <button type="submit" class="process-btn">Procesar</button>
                     <button type="button" id="saveBtn" class="save-btn" style="display:none;">Guardar</button>
                     
                     <!-- Dropdown de exportación unificado -->
@@ -87,8 +86,7 @@ header("Pragma: no-cache");
                 <!-- Barra de Filtros Avanzados -->
                 <div class="filter-bar" style="display:none;" id="filterBar">
                     <div class="filter-group">
-                        <button type="button" id="expandAllBtn" class="filter-btn">Expandir Todo</button>
-                        <button type="button" id="collapseAllBtn" class="filter-btn">Contraer Todo</button>
+                        <button type="button" id="expandAllBtn" class="filter-btn" aria-pressed="false">Expandir Todo</button>
                         <button type="button" id="undoBtn" class="filter-btn" data-icon="undo-2" disabled title="Deshacer (Ctrl+Z)">Deshacer</button>
                         <button type="button" id="redoBtn" class="filter-btn" data-icon="redo-2" disabled title="Rehacer (Ctrl+Y)">Rehacer</button>
                     </div>
@@ -171,7 +169,7 @@ header("Pragma: no-cache");
         </main>
         <footer class="app-footer">
             <span>© Licencia Open Source - Software Libre y de Derechos Abiertos</span>
-            <span>V.1 by Jose Manuel Caamaño</span>
+            <span>V0.2.0 by <a href="https://www.linkedin.com/in/rafarq" target="_blank">Rafael Roa</a> y <a href="https://www.linkedin.com/in/jmcaamanog/" target="_blank">Jose Manuel Caamaño</a></span>
         </footer>
     </div>
     <!-- Dashboard Modal -->

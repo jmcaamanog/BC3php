@@ -322,6 +322,8 @@ function renderCurrentLevel() {
     if (searchTerm) {
         filterTree(searchTerm);
     }
+
+    updateExpandAllButtonState();
 }
 
 
@@ -933,6 +935,7 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
                     toggle.classList.add('expanded');
                     expandedNodes.add(code); // Guardar estado
                 }
+                updateExpandAllButtonState();
             }
         }
     };
@@ -2315,25 +2318,38 @@ if (clearCompareBtn) {
 
 // Filtros avanzados y expansión
 const expandAllBtn = document.getElementById('expandAllBtn');
-const collapseAllBtn = document.getElementById('collapseAllBtn');
 const costFilter = document.getElementById('costFilter');
 const resourceFilter = document.getElementById('resourceFilter');
+
+function getExpandableChapterCodes() {
+    if (!parsedData) return [];
+    return Object.keys(parsedData.concepts).filter(code => code.endsWith('#'));
+}
+
+function areAllExpandableChaptersExpanded() {
+    const expandableCodes = getExpandableChapterCodes();
+    return expandableCodes.length > 0 && expandableCodes.every(code => expandedNodes.has(code));
+}
+
+function updateExpandAllButtonState() {
+    const btn = document.getElementById('expandAllBtn');
+    if (!btn) return;
+
+    const allExpanded = areAllExpandableChaptersExpanded();
+    btn.textContent = allExpanded ? 'Contraer Todo' : 'Expandir Todo';
+    btn.setAttribute('aria-pressed', allExpanded ? 'true' : 'false');
+}
 
 if (expandAllBtn) {
     expandAllBtn.addEventListener('click', () => {
         if (!parsedData) return;
-        Object.keys(parsedData.concepts).forEach(code => {
-            if (code.endsWith('#')) {
-                expandedNodes.add(code);
-            }
-        });
-        renderCurrentLevel();
-    });
-}
 
-if (collapseAllBtn) {
-    collapseAllBtn.addEventListener('click', () => {
-        expandedNodes.clear();
+        if (areAllExpandableChaptersExpanded()) {
+            expandedNodes.clear();
+        } else {
+            getExpandableChapterCodes().forEach(code => expandedNodes.add(code));
+        }
+
         renderCurrentLevel();
     });
 }
