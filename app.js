@@ -4300,128 +4300,149 @@ function exportGanttToPdf() {
     const PAGE_W = 297;
     const PAGE_H = 210;
 
-    const totalPages = Math.ceil(ganttTotalWeeks / WEEKS_PER_PAGE);
+    // Filter visible tasks (excluding children of collapsed parents)
+    const visibleTasks = ganttTasks.filter(task => {
+        const st = ganttState[task.id];
+        if (!st) return false;
+        if (task.parentId && ganttState[task.parentId] && ganttState[task.parentId].collapsed) return false;
+        return true;
+    });
 
-    for (let page = 0; page < totalPages; page++) {
-        if (page > 0) doc.addPage();
-        const weekStart = page * WEEKS_PER_PAGE + 1;
-        const weekEnd = Math.min(weekStart + WEEKS_PER_PAGE - 1, ganttTotalWeeks);
+    const yStart = MARGIN + HEADER_H;
+    const TASKS_PER_PAGE = Math.floor((PAGE_H - MARGIN - yStart) / ROW_H);
 
-        // Título
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        const projectTitle = (parsedData.properties && parsedData.properties.description) || currentFileName.replace(/\.[^/.]+$/, '');
-        doc.text('PLANNING: ' + projectTitle, MARGIN, MARGIN - 2);
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Semanas ' + weekStart + '–' + weekEnd + '   |   Página ' + (page + 1) + ' de ' + totalPages, PAGE_W - MARGIN, MARGIN - 2, { align: 'right' });
+    const totalColPages = Math.ceil(ganttTotalWeeks / WEEKS_PER_PAGE);
+    const totalRowPages = Math.ceil(visibleTasks.length / TASKS_PER_PAGE);
+    const totalPages = totalColPages * totalRowPages;
 
-        let y = MARGIN;
+    let absolutePageNum = 1;
 
-        // Cabecera: columna tareas + semanas
-        doc.setFillColor(80, 20, 40);
-        doc.rect(MARGIN, y, TASK_COL_W, HEADER_H / 2, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'bold');
-        doc.text('Tarea', MARGIN + 2, y + HEADER_H / 2 - 2);
+    for (let rPage = 0; rPage < totalRowPages; rPage++) {
+        for (let cPage = 0; cPage < totalColPages; cPage++) {
+            if (absolutePageNum > 1) doc.addPage();
 
-        // Cabecera semanas
-        for (let w = weekStart; w <= weekEnd; w++) {
-            const x = MARGIN + TASK_COL_W + (w - weekStart) * WEEK_W;
+            const weekStart = cPage * WEEKS_PER_PAGE + 1;
+            const weekEnd = Math.min(weekStart + WEEKS_PER_PAGE - 1, ganttTotalWeeks);
+
+            const taskStartIdx = rPage * TASKS_PER_PAGE;
+            const taskEndIdx = Math.min(taskStartIdx + TASKS_PER_PAGE, visibleTasks.length);
+
+            // Título
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            const projectTitle = (parsedData.properties && parsedData.properties.description) || currentFileName.replace(/\.[^/.]+$/, '');
+            doc.text('PLANNING: ' + projectTitle, MARGIN, MARGIN - 2);
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'normal');
+            doc.text('Semanas ' + weekStart + '–' + weekEnd + '   |   Página ' + absolutePageNum + ' de ' + totalPages, PAGE_W - MARGIN, MARGIN - 2, { align: 'right' });
+
+            let y = MARGIN;
+
+            // Cabecera: columna tareas + semanas
             doc.setFillColor(80, 20, 40);
-            doc.rect(x, y, WEEK_W, HEADER_H / 2, 'F');
+            doc.rect(MARGIN, y, TASK_COL_W, HEADER_H / 2, 'F');
             doc.setTextColor(255, 255, 255);
-            doc.setFontSize(5.5);
-            doc.text('S' + w, x + WEEK_W / 2, y + HEADER_H / 2 - 2, { align: 'center' });
-        }
-        // Subrow: meses
-        let mX = MARGIN + TASK_COL_W;
-        let mMonth = null; let mStart = mX;
-        for (let w = weekStart; w <= weekEnd; w++) {
-            const dt = weekToDate(w);
-            const mon = dt.toLocaleDateString('es-ES', { month: 'short' });
-            if (mon !== mMonth) {
-                if (mMonth) {
-                    doc.setFillColor(120, 40, 60);
-                    doc.rect(mStart, y + HEADER_H / 2, mX - mStart, HEADER_H / 2, 'F');
-                    doc.setTextColor(255, 255, 255);
-                    doc.setFontSize(5.5);
-                    doc.text(mMonth, mStart + (mX - mStart) / 2, y + HEADER_H - 2, { align: 'center' });
-                }
-                mMonth = mon; mStart = mX;
-            }
-            mX += WEEK_W;
-        }
-        if (mMonth) {
-            doc.setFillColor(120, 40, 60);
-            doc.rect(mStart, y + HEADER_H / 2, mX - mStart, HEADER_H / 2, 'F');
-            doc.setTextColor(255, 255, 255);
-            doc.setFontSize(5.5);
-            doc.text(mMonth, mStart + (mX - mStart) / 2, y + HEADER_H - 2, { align: 'center' });
-        }
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Tarea', MARGIN + 2, y + HEADER_H / 2 - 2);
 
-        y += HEADER_H;
-
-        // Filas de tareas
-        doc.setFont('helvetica', 'normal');
-        let rowIdx = 0;
-        ganttTasks.forEach(task => {
-            const st = ganttState[task.id];
-            if (!st) return;
-            if (task.parentId && ganttState[task.parentId] && ganttState[task.parentId].collapsed) return;
-
-            const ry = y + rowIdx * ROW_H;
-            if (ry + ROW_H > PAGE_H - MARGIN) return;
-
-            // Fondo alternado
-            doc.setFillColor(rowIdx % 2 === 0 ? 252 : 245, rowIdx % 2 === 0 ? 252 : 245, rowIdx % 2 === 0 ? 252 : 245);
-            doc.rect(MARGIN, ry, PAGE_W - 2 * MARGIN, ROW_H, 'F');
-
-            // Texto tarea (sangría por nivel)
-            const indent = (task.depth - 1) * 3;
-            doc.setFontSize(task.depth === 1 ? 6.5 : 5.5);
-            doc.setFont('helvetica', task.depth === 1 ? 'bold' : 'normal');
-            doc.setTextColor(30, 30, 30);
-            const label = task.summary.length > 38 ? task.summary.slice(0, 36) + '…' : task.summary;
-            doc.text(label, MARGIN + 2 + indent, ry + ROW_H - 2);
-
-            // Barra
-            const barStart = st.startWeek;
-            const barDur = st.durationWeeks;
-            const visStart = Math.max(weekStart, barStart);
-            const visEnd = Math.min(weekEnd, barStart + barDur - 1);
-
-            if (visEnd >= visStart) {
-                const bx = MARGIN + TASK_COL_W + (visStart - weekStart) * WEEK_W;
-                const bw = (visEnd - visStart + 1) * WEEK_W - 1;
-                const bh = ROW_H - 2;
-                const colors = [[128, 0, 32], [180, 60, 80], [200, 100, 110]];
-                const c = colors[Math.min(task.depth - 1, 2)];
-                doc.setFillColor(c[0], c[1], c[2]);
-                doc.roundedRect(bx, ry + 1, bw, bh, 1, 1, 'F');
-            }
-
-            // Grid vertical de semanas
-            doc.setDrawColor(220, 220, 220);
-            doc.setLineWidth(0.1);
+            // Cabecera semanas
             for (let w = weekStart; w <= weekEnd; w++) {
-                const wx = MARGIN + TASK_COL_W + (w - weekStart) * WEEK_W;
-                doc.line(wx, ry, wx, ry + ROW_H);
+                const x = MARGIN + TASK_COL_W + (w - weekStart) * WEEK_W;
+                doc.setFillColor(80, 20, 40);
+                doc.rect(x, y, WEEK_W, HEADER_H / 2, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(5.5);
+                doc.text('S' + w, x + WEEK_W / 2, y + HEADER_H / 2 - 2, { align: 'center' });
+            }
+            // Subrow: meses
+            let mX = MARGIN + TASK_COL_W;
+            let mMonth = null; let mStart = mX;
+            for (let w = weekStart; w <= weekEnd; w++) {
+                const dt = weekToDate(w);
+                const mon = dt.toLocaleDateString('es-ES', { month: 'short' });
+                if (mon !== mMonth) {
+                    if (mMonth) {
+                        doc.setFillColor(120, 40, 60);
+                        doc.rect(mStart, y + HEADER_H / 2, mX - mStart, HEADER_H / 2, 'F');
+                        doc.setTextColor(255, 255, 255);
+                        doc.setFontSize(5.5);
+                        doc.text(mMonth, mStart + (mX - mStart) / 2, y + HEADER_H - 2, { align: 'center' });
+                    }
+                    mMonth = mon; mStart = mX;
+                }
+                mX += WEEK_W;
+            }
+            if (mMonth) {
+                doc.setFillColor(120, 40, 60);
+                doc.rect(mStart, y + HEADER_H / 2, mX - mStart, HEADER_H / 2, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(5.5);
+                doc.text(mMonth, mStart + (mX - mStart) / 2, y + HEADER_H - 2, { align: 'center' });
             }
 
-            rowIdx++;
-        });
+            y += HEADER_H;
 
-        // Borde general
-        doc.setDrawColor(180, 180, 180);
-        doc.setLineWidth(0.3);
-        doc.rect(MARGIN, MARGIN, PAGE_W - 2 * MARGIN, PAGE_H - 2 * MARGIN);
+            // Filas de tareas de la página actual
+            doc.setFont('helvetica', 'normal');
+            let rowIdx = 0;
+            for (let i = taskStartIdx; i < taskEndIdx; i++) {
+                const task = visibleTasks[i];
+                const st = ganttState[task.id];
 
-        // Pie de página
-        doc.setFontSize(6);
-        doc.setTextColor(150, 150, 150);
-        doc.text('Generado por BC3 Viewer — ' + new Date().toLocaleDateString('es-ES'), MARGIN, PAGE_H - MARGIN + 4);
+                const ry = y + rowIdx * ROW_H;
+
+                // Fondo alternado
+                doc.setFillColor(rowIdx % 2 === 0 ? 252 : 245, rowIdx % 2 === 0 ? 252 : 245, rowIdx % 2 === 0 ? 252 : 245);
+                doc.rect(MARGIN, ry, PAGE_W - 2 * MARGIN, ROW_H, 'F');
+
+                // Texto tarea (sangría por nivel)
+                const indent = (task.depth - 1) * 3;
+                doc.setFontSize(task.depth === 1 ? 6.5 : 5.5);
+                doc.setFont('helvetica', task.depth === 1 ? 'bold' : 'normal');
+                doc.setTextColor(30, 30, 30);
+                const label = task.summary.length > 38 ? task.summary.slice(0, 36) + '…' : task.summary;
+                doc.text(label, MARGIN + 2 + indent, ry + ROW_H - 2);
+
+                // Barra
+                const barStart = st.startWeek;
+                const barDur = st.durationWeeks;
+                const visStart = Math.max(weekStart, barStart);
+                const visEnd = Math.min(weekEnd, barStart + barDur - 1);
+
+                if (visEnd >= visStart) {
+                    const bx = MARGIN + TASK_COL_W + (visStart - weekStart) * WEEK_W;
+                    const bw = (visEnd - visStart + 1) * WEEK_W - 1;
+                    const bh = ROW_H - 2;
+                    const colors = [[128, 0, 32], [180, 60, 80], [200, 100, 110]];
+                    const c = colors[Math.min(task.depth - 1, 2)];
+                    doc.setFillColor(c[0], c[1], c[2]);
+                    doc.roundedRect(bx, ry + 1, bw, bh, 1, 1, 'F');
+                }
+
+                // Grid vertical de semanas
+                doc.setDrawColor(220, 220, 220);
+                doc.setLineWidth(0.1);
+                for (let w = weekStart; w <= weekEnd; w++) {
+                    const wx = MARGIN + TASK_COL_W + (w - weekStart) * WEEK_W;
+                    doc.line(wx, ry, wx, ry + ROW_H);
+                }
+
+                rowIdx++;
+            }
+
+            // Borde general
+            doc.setDrawColor(180, 180, 180);
+            doc.setLineWidth(0.3);
+            doc.rect(MARGIN, MARGIN, PAGE_W - 2 * MARGIN, PAGE_H - 2 * MARGIN);
+
+            // Pie de página
+            doc.setFontSize(6);
+            doc.setTextColor(150, 150, 150);
+            doc.text('Generado por BC3 Viewer — ' + new Date().toLocaleDateString('es-ES'), MARGIN, PAGE_H - MARGIN + 4);
+
+            absolutePageNum++;
+        }
     }
 
     const baseName = currentFileName.replace(/\.[^/.]+$/, '');
