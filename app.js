@@ -1,6 +1,16 @@
 // 1. File Input Change
 const fileInput = document.getElementById('bc3file');
 let currentFileName = "presupuesto.bc3";
+let draftActive = false;
+let draftNode = {
+    parentCode: null,
+    index: 0,
+    depth: 0,
+    unit: 'ud',
+    summary: '',
+    qty: '',
+    price: ''
+};
 if (fileInput) {
     fileInput.addEventListener('change', function (e) {
         if (this.files && this.files.length > 0) {
@@ -92,6 +102,226 @@ let chaptersChartInstance = null;
 // Drill-down navigation state
 let navigationStack = []; // Stack of { code, title } objects
 let currentLevel = null; // null = root level, or code of current parent
+
+// Column resizing state and defaults (Code, Unit, Qty, Price, Amount)
+window.columnWidths = [190, 45, 80, 100, 110];
+
+// Calcular anchos óptimos para cada columna basándose en el contenido real
+function calculateOptimalColumnWidths(data) {
+    if (!data) return [190, 45, 80, 100, 110];
+    
+    // 1. Calcular profundidades de todos los conceptos para tabular el Código correctamente
+    const depths = {};
+    function traverse(code, d) {
+        depths[code] = Math.max(depths[code] || 0, d);
+        const concept = data.concepts[code];
+        if (concept && Array.isArray(concept.children)) {
+            concept.children.forEach(childCode => {
+                traverse(childCode, d + 1);
+            });
+        }
+    }
+    
+    const roots = Array.isArray(data.root_nodes) ? data.root_nodes : Object.values(data.root_nodes);
+    roots.forEach(code => traverse(code, 0));
+
+    let maxCodeWidth = 150;
+    let maxUnitWidth = 40;
+    let maxQtyWidth = 80;
+    let maxPriceWidth = 100;
+    let maxAmountWidth = 110;
+
+    // Crear un canvas temporal para medir texto usando la fuente del visor
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+        ctx.font = '600 0.9rem Inter, system-ui, sans-serif';
+    }
+
+    Object.values(data.concepts).forEach(concept => {
+        const codeText = concept.code.replace(/#+\s*$/, '');
+        const depth = depths[concept.code] || 0;
+        
+        // Medida del código: texto + indentación (depth * 20px) + expand-arrow/paddings
+        const textWidth = ctx ? ctx.measureText(codeText).width : (codeText.length * 8);
+        const totalCodeWidth = textWidth + (depth * 20) + 60; // 60px para el botón expandir y padding
+        if (totalCodeWidth > maxCodeWidth) maxCodeWidth = totalCodeWidth;
+
+        // Medida de unidad
+        const unitText = concept.unit || '';
+        const unitWidth = ctx ? ctx.measureText(unitText).width + 24 : (unitText.length * 8 + 24);
+        if (unitWidth > maxUnitWidth) maxUnitWidth = unitWidth;
+
+        // Medida de precio
+        const priceVal = parseFloat(concept.price) || 0;
+        const priceText = priceVal.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
+        const priceWidth = ctx ? ctx.measureText(priceText).width + 24 : (priceText.length * 8 + 24);
+        if (priceWidth > maxPriceWidth) maxPriceWidth = priceWidth;
+    });
+
+    // Límites para evitar anchos extremos y asegurar un diseño limpio y equilibrado
+    maxCodeWidth = Math.min(350, Math.max(160, Math.ceil(maxCodeWidth)));
+    maxUnitWidth = Math.min(80, Math.max(45, Math.ceil(maxUnitWidth)));
+    maxQtyWidth = Math.min(110, Math.max(80, Math.ceil(maxQtyWidth)));
+    maxPriceWidth = Math.min(160, Math.max(100, Math.ceil(maxPriceWidth)));
+    maxAmountWidth = Math.min(180, Math.max(110, Math.ceil(maxAmountWidth)));
+
+    return [maxCodeWidth, maxUnitWidth, maxQtyWidth, maxPriceWidth, maxAmountWidth];
+}
+
+/**
+ * Transforma un elemento de texto en un campo editable con mini lápiz azul y confirmación (OK/Cancelar).
+ * @param {HTMLElement} textEl El nodo de texto (ej. td, div, h2).
+ * @param {Function} onSave Callback al guardar cambios. Retorna true si tiene éxito.
+ * @param {Object} options Configuración adicional (isNumeric, multiLine, onFocus).
+ */
+function setupExplicitEdit(textEl, onSave, options = {}) {
+    if (!textEl) return;
+    
+    if (textEl.dataset.explicitEditSetup) return;
+    textEl.dataset.explicitEditSetup = "true";
+    
+    // Guardar el contenido original
+    const originalHTML = textEl.innerHTML;
+    textEl.innerHTML = '';
+    
+    // Crear el span interno que será editable
+    const valEl = document.createElement('span');
+    valEl.className = 'editable-val';
+    valEl.contentEditable = "false";
+    valEl.innerHTML = originalHTML;
+    
+    // Crear el contenedor de alineación flexible interno
+    const container = document.createElement('div');
+    container.className = 'editable-container';
+    container.appendChild(valEl);
+    
+    const actions = document.createElement('div');
+    actions.className = 'edit-actions';
+    
+    const btnPencil = document.createElement('button');
+    btnPencil.type = 'button';
+    btnPencil.className = 'btn-edit-pencil';
+    btnPencil.textContent = '✏️';
+    btnPencil.title = 'Editar';
+    
+    const btnOk = document.createElement('button');
+    btnOk.type = 'button';
+    btnOk.className = 'btn-edit-ok';
+    btnOk.textContent = '✔️';
+    btnOk.title = 'Aceptar';
+    btnOk.style.display = 'none';
+    
+    const btnCancel = document.createElement('button');
+    btnCancel.type = 'button';
+    btnCancel.className = 'btn-edit-cancel';
+    btnCancel.textContent = '❌';
+    btnCancel.title = 'Cancelar';
+    btnCancel.style.display = 'none';
+    
+    actions.appendChild(btnPencil);
+    actions.appendChild(btnOk);
+    actions.appendChild(btnCancel);
+    container.appendChild(actions);
+    
+    // Inyectar el contenedor dentro del elemento original sin romper su etiqueta o jerarquía en el DOM
+    textEl.appendChild(container);
+    
+    let originalVal = "";
+    
+    function startEdit() {
+        originalVal = valEl.innerHTML;
+        if (options.isNumeric) {
+            const valText = valEl.textContent.trim().replace(/[^\d.,-]/g, '').replace(',', '.');
+            const numVal = parseFloat(valText);
+            valEl.textContent = isNaN(numVal) ? '' : numVal;
+        }
+        
+        valEl.contentEditable = "true";
+        valEl.focus();
+        
+        btnPencil.style.display = 'none';
+        btnOk.style.display = 'inline-flex';
+        btnCancel.style.display = 'inline-flex';
+        
+        if (options.onFocus) options.onFocus();
+    }
+    
+    function saveEdit() {
+        let newValText = valEl.textContent.trim();
+        if (options.multiLine) {
+            newValText = valEl.innerHTML
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<div\b[^>]*>/gi, '')
+                .replace(/<\/div>/gi, '\n')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/<[^>]*>/g, '')
+                .trim();
+        }
+        
+        let success = true;
+        if (onSave) {
+            success = onSave(newValText);
+        }
+        
+        if (success !== false) {
+            valEl.contentEditable = "false";
+            btnPencil.style.display = 'inline-flex';
+            btnOk.style.display = 'none';
+            btnCancel.style.display = 'none';
+        }
+    }
+    
+    function cancelEdit() {
+        valEl.innerHTML = originalVal;
+        valEl.contentEditable = "false";
+        btnPencil.style.display = 'inline-flex';
+        btnOk.style.display = 'none';
+        btnCancel.style.display = 'none';
+    }
+    
+    btnPencil.addEventListener('click', (e) => {
+        e.stopPropagation();
+        startEdit();
+    });
+    
+    btnOk.addEventListener('click', (e) => {
+        e.stopPropagation();
+        saveEdit();
+    });
+    
+    btnCancel.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cancelEdit();
+    });
+    
+    valEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !options.multiLine) {
+            e.preventDefault();
+            saveEdit();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelEdit();
+        }
+    });
+    
+    valEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+}
+
+/**
+ * Actualiza el texto de un elemento editable de manera segura sin destruir sus botones e icono de lápiz.
+ */
+function updateEditableText(el, text, isHTML = false) {
+    if (!el) return;
+    const valEl = el.querySelector('.editable-val') || el;
+    if (isHTML) {
+        valEl.innerHTML = text;
+    } else {
+        valEl.textContent = text;
+    }
+}
 
 // Obtener la descomposición de un concepto con factores
 function getConceptDecomposition(concept) {
@@ -198,14 +428,77 @@ function renderCurrentLevel() {
     // Create Header
     const header = document.createElement('div');
     header.className = 'tree-header';
-    header.innerHTML = `
-        <div>Código</div>
-        <div>Ud</div>
-        <div>Resumen</div>
-        <div>Cantidad</div>
-        <div>Precio</div>
-        <div>Importe</div>
+    header.id = 'treeHeader';
+    if (window.columnWidths && window.columnWidths.length >= 5) {
+        const w = window.columnWidths;
+        header.style.gridTemplateColumns = `${w[0]}px ${w[1]}px 1fr ${w[2]}px ${w[3]}px ${w[4]}px`;
+    }
+    
+    const colHCode = document.createElement('div');
+    colHCode.style.display = 'flex';
+    colHCode.style.alignItems = 'center';
+    colHCode.style.justifyContent = 'space-between';
+    colHCode.style.gap = '8px';
+    colHCode.innerHTML = `<span>Código</span>`;
+    
+    const toggleDraftBtn = document.createElement('button');
+    toggleDraftBtn.type = 'button';
+    toggleDraftBtn.id = 'toggleDraftBtn';
+    toggleDraftBtn.style.cssText = `
+        padding: 3px 8px;
+        font-size: 11px;
+        margin: 0;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background-color 0.2s;
     `;
+    if (draftActive) {
+        toggleDraftBtn.textContent = '✕ Cerrar';
+        toggleDraftBtn.style.backgroundColor = '#ef4444';
+        toggleDraftBtn.style.color = 'white';
+    } else {
+        toggleDraftBtn.textContent = '➕ Nueva Partida';
+        toggleDraftBtn.style.backgroundColor = 'var(--accent, #3b82f6)';
+        toggleDraftBtn.style.color = 'white';
+    }
+    toggleDraftBtn.onclick = (e) => {
+        e.stopPropagation();
+        draftActive = !draftActive;
+        if (draftActive) {
+            draftNode = {
+                parentCode: null,
+                index: 0,
+                depth: 0,
+                unit: 'ud',
+                summary: '',
+                qty: '',
+                price: ''
+            };
+        }
+        renderCurrentLevel();
+    };
+    colHCode.appendChild(toggleDraftBtn);
+
+    const colHUnit = document.createElement('div');
+    colHUnit.textContent = 'Ud';
+    const colHSummary = document.createElement('div');
+    colHSummary.textContent = 'Resumen';
+    const colHQty = document.createElement('div');
+    colHQty.textContent = 'Cantidad';
+    const colHPrice = document.createElement('div');
+    colHPrice.textContent = 'Precio';
+    const colHAmount = document.createElement('div');
+    colHAmount.textContent = 'Importe';
+
+    header.appendChild(colHCode);
+    header.appendChild(colHUnit);
+    header.appendChild(colHSummary);
+    header.appendChild(colHQty);
+    header.appendChild(colHPrice);
+    header.appendChild(colHAmount);
+    
     treeContainer.appendChild(header);
 
     const rootList = document.createElement('div');
@@ -239,12 +532,18 @@ function renderCurrentLevel() {
     } else {
         // Desktop: Show full tree
         const roots = Array.isArray(parsedData.root_nodes) ? parsedData.root_nodes : Object.values(parsedData.root_nodes);
-        roots.forEach(code => {
+        roots.forEach((code, idx) => {
+            if (draftActive && draftNode.parentCode === null && draftNode.index === idx) {
+                rootList.appendChild(createDraftNodeRow(0));
+            }
             const rootNode = createNode(code, true, 0, 1, false); // false = desktop mode
             if (rootNode) {
                 rootList.appendChild(rootNode);
             }
         });
+        if (draftActive && draftNode.parentCode === null && draftNode.index >= roots.length) {
+            rootList.appendChild(createDraftNodeRow(0));
+        }
     }
 
     treeContainer.appendChild(rootList);
@@ -254,59 +553,34 @@ function renderCurrentLevel() {
     if (searchTerm) {
         filterTree(searchTerm);
     }
-}
-
-
-
-// Initialize resize on mousedown
-function initResize(e) {
-    e.preventDefault();
-    const col = e.target.parentElement;
-    resizeState.isResizing = true;
-    resizeState.colIdx = parseInt(col.dataset.colIdx);
-    resizeState.startX = e.pageX;
-    resizeState.startWidth = window.columnWidths[resizeState.colIdx];
-
-    e.target.classList.add('resizing');
-
-    document.addEventListener('mousemove', doResize);
-    document.addEventListener('mouseup', stopResize);
-}
-
-// Resize during mousemove
-function doResize(e) {
-    if (!resizeState.isResizing) return;
-
-    const diff = e.pageX - resizeState.startX;
-    const newWidth = Math.max(30, resizeState.startWidth + diff);
-
-    window.columnWidths[resizeState.colIdx] = newWidth;
+    
+    // Apply current column width template
     updateGridTemplate();
 }
 
-// Stop resizing on mouseup
-function stopResize(e) {
-    if (!resizeState.isResizing) return;
 
-    resizeState.isResizing = false;
-    document.querySelectorAll('.resize-handle.resizing').forEach(el => el.classList.remove('resizing'));
-
-    document.removeEventListener('mousemove', doResize);
-    document.removeEventListener('mouseup', stopResize);
-}
 
 // Update grid template for all rows
 function updateGridTemplate() {
-    const template = window.columnWidths.map(w => w + 'px').join(' ');
+    if (!window.columnWidths || window.columnWidths.length < 5) return;
+    
+    const w = window.columnWidths;
+    const template = `${w[0]}px ${w[1]}px 1fr ${w[2]}px ${w[3]}px ${w[4]}px`;
 
     // Update header
     const header = document.getElementById('treeHeader');
     if (header) {
         header.style.gridTemplateColumns = template;
-        // Update individual header column widths
+        
+        // Update individual header column widths (excluding summary 1fr)
         const cols = header.children;
-        for (let i = 0; i < cols.length; i++) {
-            cols[i].style.width = window.columnWidths[i] + 'px';
+        if (cols.length >= 6) {
+            cols[0].style.width = w[0] + 'px';
+            cols[1].style.width = w[1] + 'px';
+            // cols[2] is Resumen (1fr), we don't set a fixed width on it
+            cols[3].style.width = w[2] + 'px';
+            cols[4].style.width = w[3] + 'px';
+            cols[5].style.width = w[4] + 'px';
         }
     }
 
@@ -321,6 +595,9 @@ function renderApp(data) {
     originalFileText = data.original_text || "";
     expandedNodes.clear();
 
+    // Calcular anchos de columna automáticos óptimos
+    window.columnWidths = calculateOptimalColumnWidths(data);
+
     // Inicializar historial
     stateHistory = [JSON.stringify(parsedData)];
     historyIndex = 0;
@@ -330,17 +607,20 @@ function renderApp(data) {
     navigationStack = [];
     currentLevel = null;
 
-    // Show control buttons
+    // Show control containers and buttons
+    const dashboardContainer = document.getElementById('dashboardContainer');
+    const vizContainer = document.getElementById('vizContainer');
+    const coeffsContainer = document.getElementById('coeffsContainer');
+    const compareContainer = document.getElementById('compareContainer');
+    const exportContainer = document.getElementById('exportContainer');
+    if (dashboardContainer) dashboardContainer.style.display = 'flex';
+    if (vizContainer) vizContainer.style.display = 'flex';
+    if (coeffsContainer) coeffsContainer.style.display = 'flex';
+    if (compareContainer) compareContainer.style.display = 'flex';
+    if (exportContainer) exportContainer.style.display = 'flex';
+
     const sBtn = document.getElementById('saveBtn');
-    const exportDrop = document.getElementById('exportDropdown');
-    const cBtn = document.getElementById('compareBtn');
-    const dBtn = document.getElementById('dashboardBtn');
     if (sBtn) sBtn.style.display = 'inline-block';
-    if (exportDrop) exportDrop.style.display = 'inline-block';
-    if (cBtn) cBtn.style.display = 'inline-block';
-    if (dBtn) dBtn.style.display = 'inline-block';
-    const pBtn = document.getElementById('planningBtn');
-    if (pBtn) pBtn.style.display = 'inline-block';
 
     // Resetear comparador y coeficientes al cargar un nuevo presupuesto
     compareData = null;
@@ -414,6 +694,11 @@ function renderApp(data) {
         // Render using new navigation system
         renderCurrentLevel();
 
+        // Reset to active Presupuesto view tab
+        const presupuestoBtn = document.getElementById('presupuestoBtn');
+        if (presupuestoBtn) {
+            presupuestoBtn.click();
+        }
     } catch (e) {
         console.error(e);
         document.getElementById('stats').textContent += ' | ERROR RENDER: ' + e.message;
@@ -588,6 +873,10 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
     const isChapter = concept.code.endsWith('#') || hasChildren;
 
     row.className = 'tree-node-row';
+    if (window.columnWidths && window.columnWidths.length >= 5) {
+        const w = window.columnWidths;
+        row.style.gridTemplateColumns = `${w[0]}px ${w[1]}px 1fr ${w[2]}px ${w[3]}px ${w[4]}px`;
+    }
 
     if (isChapter) {
         if (depth === 0) {
@@ -611,10 +900,9 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
     // Hide if no children, but keep space? Or just opacity 0? 
     // User said "remove column", if simple node, maybe no triangle at all?
     // "ponerlos al lado del código".
-    // Usually leaves don't have arrows.
-    if (hasChildren) {
+    if (hasChildren || (draftActive && draftNode.parentCode === code)) {
         toggle.style.opacity = '1';
-        if (isRoot || expandedNodes.has(code)) toggle.classList.add('expanded');
+        if (isRoot || expandedNodes.has(code) || (draftActive && draftNode.parentCode === code)) toggle.classList.add('expanded');
     } else {
         toggle.style.opacity = '0'; // Invisible but keeps alignment if fixed width
         // Or display none? If display none, text shifts left. Better to keep placeholder or use opacity.
@@ -664,37 +952,19 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
     colSummary.className = 'col-summary';
     colSummary.textContent = concept.summary || '(Sin título)';
     
-    colSummary.contentEditable = "true";
-    colSummary.addEventListener('click', (e) => {
-        e.stopPropagation(); // Evitar expandir/contraer la fila al editar
-    });
-
-    colSummary.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault(); // Evitar salto de línea
-            
-            const newSummary = colSummary.textContent.trim();
-            if (newSummary && concept.summary !== newSummary) {
-                concept.summary = newSummary;
-                
-                // Actualizar panel de detalles si coincide el código
-                const detCodeEl = document.getElementById('detCode');
-                const detSummaryEl = document.getElementById('detSummary');
-                if (detCodeEl && detSummaryEl && detCodeEl.textContent === concept.code.replace(/#+\s*$/, '')) {
-                    detSummaryEl.textContent = newSummary;
-                }
-            }
-            colSummary.blur();
-        }
-    });
-
-    colSummary.addEventListener('blur', () => {
-        const newSummary = colSummary.textContent.trim();
+    setupExplicitEdit(colSummary, (newSummary) => {
         if (newSummary && newSummary !== concept.summary) {
             concept.summary = newSummary;
             saveHistoryState();
-        } else {
-            colSummary.textContent = concept.summary || '(Sin título)';
+            
+            // Actualizar panel de detalles si coincide el código
+            const detCodeEl = document.getElementById('detCode');
+            const detSummaryEl = document.getElementById('detSummary');
+            if (detCodeEl && detSummaryEl && detCodeEl.textContent === concept.code.replace(/#+\s*$/, '')) {
+                const valEl = detSummaryEl.classList.contains('editable-val') ? detSummaryEl : detSummaryEl.querySelector('.editable-val');
+                if (valEl) valEl.textContent = newSummary;
+                else detSummaryEl.textContent = newSummary;
+            }
         }
     });
 
@@ -730,54 +1000,9 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
     
     const isEditablePrice = !concept.code.endsWith('#');
     if (isEditablePrice) {
-        colPrice.contentEditable = "true";
-        colPrice.addEventListener('click', (e) => {
-            e.stopPropagation(); // Evitar expandir/contraer la fila al editar
-        });
-
-        colPrice.addEventListener('focus', () => {
-            // Mostrar número simple sin formatear para edición cómoda
-            const rawPrice = parseFloat(concept.price) || 0;
-            colPrice.textContent = rawPrice;
-            
-            // Seleccionar todo el texto
-            const range = document.createRange();
-            range.selectNodeContents(colPrice);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-        });
-
-        colPrice.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault(); // Evitar salto de línea
-                
-                const valText = colPrice.textContent.trim().replace(',', '.');
-                const newVal = parseFloat(valText);
-
-                if (!isNaN(newVal) && newVal >= 0) {
-                    if (parseFloat(concept.price) !== newVal) {
-                        concept.price = newVal;
-                        concept.isManualPrice = true; // Bloquear precio manual
-                        recalculateAll();
-                        
-                        const scrollPos = document.getElementById('treeContent').scrollTop;
-                        renderCurrentLevel();
-                        document.getElementById('treeContent').scrollTop = scrollPos;
-                        
-                        updateTotalBudgetDisplay();
-                        saveHistoryState();
-                        return; // Retornar ya que re-renderiza y destruye el foco
-                    }
-                }
-                colPrice.blur();
-            }
-        });
-
-        colPrice.addEventListener('blur', () => {
-            const valText = colPrice.textContent.trim().replace(',', '.');
-            const newVal = parseFloat(valText);
-
+        setupExplicitEdit(colPrice, (newPriceText) => {
+            const rawText = newPriceText.trim().replace(',', '.');
+            const newVal = parseFloat(rawText);
             if (!isNaN(newVal) && newVal >= 0) {
                 if (parseFloat(concept.price) !== newVal) {
                     concept.price = newVal;
@@ -790,12 +1015,14 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
                     
                     updateTotalBudgetDisplay();
                     saveHistoryState();
+                    return true;
                 }
-            } else {
-                // Revertir al valor original si no es número válido
-                const prevPrice = parseFloat(concept.price) || 0;
-                colPrice.textContent = prevPrice.toLocaleString('es-ES', { minimumFractionDigits: 2 });
             }
+            const prevPrice = parseFloat(concept.price) || 0;
+            colPrice.textContent = prevPrice.toLocaleString('es-ES', { minimumFractionDigits: 2 });
+            return false;
+        }, {
+            isNumeric: true
         });
     } else {
         colPrice.contentEditable = "false";
@@ -874,11 +1101,12 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
     container.appendChild(row);
 
     // Children Container
-    if (hasChildren) {
+    const draftForThisNode = draftActive && draftNode.parentCode === code;
+    if (hasChildren || draftForThisNode) {
         const childrenContainer = document.createElement('div');
         childrenContainer.className = 'tree-node-children';
         
-        const isNodeExpanded = isRoot || expandedNodes.has(code);
+        const isNodeExpanded = isRoot || expandedNodes.has(code) || draftForThisNode;
         if (isNodeExpanded) {
             childrenContainer.classList.add('visible');
         }
@@ -910,12 +1138,18 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
         // Usually items with measurements don't have further sub-items, but chapters do.
         // Only render children in desktop mode (in mobile, we navigate to them)
         if (!mobileMode) {
-            decomposition.forEach(item => {
+            decomposition.forEach((item, idx) => {
+                if (draftActive && draftNode.parentCode === code && draftNode.index === idx) {
+                    childrenContainer.appendChild(createDraftNodeRow(depth + 1));
+                }
                 const childNode = createNode(item.code, false, depth + 1, item.factor, mobileMode, item.type || 0);
                 if (childNode) {
                     childrenContainer.appendChild(childNode);
                 }
             });
+            if (draftActive && draftNode.parentCode === code && draftNode.index >= decomposition.length) {
+                childrenContainer.appendChild(createDraftNodeRow(depth + 1));
+            }
         }
 
 
@@ -1143,12 +1377,29 @@ function showDetails(code) {
     emptyState.style.display = 'none';
     panel.style.display = 'block';
 
+    const isRoot = Array.isArray(parsedData.root_nodes) ? parsedData.root_nodes.includes(concept.code) : Object.values(parsedData.root_nodes).includes(concept.code);
+    const isChapter = concept.code.endsWith('#') || (concept.decomposition && concept.decomposition.length > 0) || (concept.children && concept.children.length > 0) || isRoot;
+    
+    const addPartidaContainer = document.getElementById('addPartidaContainer');
+    if (addPartidaContainer) {
+        if (isChapter) {
+            addPartidaContainer.style.display = 'block';
+            const addPartidaBtn = document.getElementById('addPartidaBtn');
+            if (addPartidaBtn) {
+                addPartidaBtn.dataset.parentCode = concept.code;
+                addPartidaBtn.textContent = `➕ Añadir Partida a ${concept.code.replace(/#+\s*$/, '')}`;
+            }
+        } else {
+            addPartidaContainer.style.display = 'none';
+        }
+    }
+
     document.getElementById('detCode').textContent = concept.code.replace(/#+\s*$/, '');
-    document.getElementById('detSummary').textContent = concept.summary;
+    updateEditableText(document.getElementById('detSummary'), concept.summary);
     document.getElementById('detPrice').textContent = parseFloat(concept.price).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
     // Description: Prefer ~T description, fallback to Summary
-    document.getElementById('detDescription').innerHTML = (concept.description || concept.summary).replace(/\n/g, '<br>');
+    updateEditableText(document.getElementById('detDescription'), (concept.description || concept.summary).replace(/\n/g, '<br>'), true);
 
     // Mediciones en Panel de Escritorio
     const msSection = document.getElementById('detMeasurementsSection');
@@ -1179,13 +1430,49 @@ function showDetails(code) {
             const total = childPrice * factor;
             totalCalc += total;
 
-            row.innerHTML = `
-                <td>${item.code.replace(/#+\s*$/, '')}</td>
-                <td>${factor.toLocaleString('es-ES')} ${childNode ? childNode.unit : ''}</td>
-                <td>${childNode ? childNode.summary : '???'}</td>
-                <td>${childPrice.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
-                <td><strong>${total.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</strong></td>
-            `;
+            const tdCode = document.createElement('td');
+            tdCode.textContent = item.code.replace(/#+\s*$/, '');
+            
+            const tdFactor = document.createElement('td');
+            tdFactor.textContent = `${factor.toLocaleString('es-ES')} ${childNode ? childNode.unit : ''}`;
+            
+            const tdSummary = document.createElement('td');
+            tdSummary.textContent = childNode ? childNode.summary : '???';
+            if (childNode) {
+                setupExplicitEdit(tdSummary, (newSummary) => {
+                    if (newSummary && newSummary !== childNode.summary) {
+                        childNode.summary = newSummary;
+                        saveHistoryState();
+                        
+                        const treeNodeSummary = document.querySelector(`.tree-node-container[data-code="${childNode.code}"] > .tree-node-row > .col-summary`);
+                        if (treeNodeSummary) {
+                            const valEl = treeNodeSummary.querySelector('.editable-val') || treeNodeSummary;
+                            valEl.textContent = newSummary;
+                        }
+                        
+                        const detCodeEl = document.getElementById('detCode');
+                        const detSummaryEl = document.getElementById('detSummary');
+                        if (detCodeEl && detSummaryEl && detCodeEl.textContent === childNode.code.replace(/#+\s*$/, '')) {
+                            const valEl = detSummaryEl.querySelector('.editable-val') || detSummaryEl;
+                            valEl.textContent = newSummary;
+                        }
+                        return true;
+                    }
+                    return false;
+                });
+            }
+            
+            const tdPrice = document.createElement('td');
+            tdPrice.textContent = `${childPrice.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €`;
+            
+            const tdTotal = document.createElement('td');
+            tdTotal.innerHTML = `<strong>${total.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</strong>`;
+            
+            row.appendChild(tdCode);
+            row.appendChild(tdFactor);
+            row.appendChild(tdSummary);
+            row.appendChild(tdPrice);
+            row.appendChild(tdTotal);
             tbody.appendChild(row);
         });
     } else {
@@ -1259,7 +1546,7 @@ function updateTotalBudgetDisplay() {
         const pem = calculateTotalBudget();
         
         // Actualizar PEM
-        totalEl.textContent = `PEM: ${pem.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+        totalEl.innerHTML = `<span class="lbl">PEM</span><span class="val">${pem.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>`;
         
         // Mostrar botón de coeficientes
         if (toggleCoeffsBtn) toggleCoeffsBtn.style.display = 'inline-block';
@@ -1274,8 +1561,8 @@ function updateTotalBudgetDisplay() {
         const pec = pemWithCoeffs * (1 + baja);
         
         if (totalPecEl) {
-            totalPecEl.textContent = `PEC: ${pec.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-            totalPecEl.style.display = 'inline-block';
+            totalPecEl.innerHTML = `<span class="lbl">PEC</span><span class="val">${pec.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>`;
+            totalPecEl.style.display = 'flex';
         }
     }
 }
@@ -1368,6 +1655,18 @@ function generateModifiedBC3() {
         } else {
             modifiedLines.push(line);
         }
+    }
+
+    // Exportar las nuevas partidas agregadas al archivo BC3
+    if (parsedData && parsedData.concepts) {
+        Object.values(parsedData.concepts).forEach(concept => {
+            if (concept.isNewPartida) {
+                const formattedPrice = (parseFloat(concept.price) || 0).toFixed(2);
+                // Formato FIEBDC-3: ~C|código|unidad|resumen|precio|tipo|
+                const cLine = `~C|${concept.code}|${concept.unit || 'ud'}|${concept.summary || ''}|${formattedPrice}|0|`;
+                modifiedLines.push(cLine);
+            }
+        });
     }
 
     return modifiedLines.join('\r\n');
@@ -1952,63 +2251,241 @@ function getTopChapters() {
 }
 
 function renderCharts() {
+    if (!parsedData) return;
+
     const dist = calculateResourceDistribution();
-    const topCaps = getTopChapters();
-
-    if (typeChartInstance) typeChartInstance.destroy();
-    if (chaptersChartInstance) chaptersChartInstance.destroy();
-
     const isDark = document.body.classList.contains('dark-theme');
     const labelColor = isDark ? '#e2e8f0' : '#1e293b';
+    const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
 
-    const ctx1 = document.getElementById('resourceTypeChart').getContext('2d');
-    typeChartInstance = new Chart(ctx1, {
-        type: 'doughnut',
-        data: {
-            labels: ['Mano de Obra (MO)', 'Maquinaria (MAQ)', 'Materiales (MAT)', 'Otros/Subcontratas (SUB)'],
-            datasets: [{
-                data: [dist.MO, dist.MAQ, dist.MAT, dist.SUB],
-                backgroundColor: ['#ef4444', '#d97706', '#3b82f6', '#a855f7'],
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: labelColor }
+    // ─── Recopilar datos de capítulos (children del root) ───
+    const roots = Array.isArray(parsedData.root_nodes) ? parsedData.root_nodes : Object.values(parsedData.root_nodes);
+    const chapters = [];
+    roots.forEach(rootCode => {
+        const root = parsedData.concepts[rootCode];
+        if (!root) return;
+        const children = getConceptDecomposition(root);
+        children.forEach(ch => {
+            const concept = parsedData.concepts[ch.code];
+            if (!concept) return;
+            // Calcular distribución MO/MAQ/MAT por capítulo
+            let mo = 0, maq = 0, mat = 0, sub = 0;
+            function accumulate(code, qty) {
+                const c = parsedData.concepts[code];
+                if (!c) return;
+                if (c.code.endsWith('#') || c.is_root) {
+                    getConceptDecomposition(c).forEach(ci => accumulate(ci.code, qty * (parseFloat(ci.factor) || 1)));
+                } else {
+                    (c.decomposition || []).forEach(item => {
+                        const child = parsedData.concepts[item.code];
+                        const childPrice = child ? (parseFloat(child.price) || 0) : 0;
+                        const cost = (parseFloat(item.factor) || 0) * childPrice * qty;
+                        if (item.type === 1) mo += cost;
+                        else if (item.type === 2) maq += cost;
+                        else if (item.type === 3) mat += cost;
+                        else sub += cost;
+                    });
+                    if (!c.decomposition || c.decomposition.length === 0) sub += (parseFloat(c.price) || 0) * qty;
                 }
             }
-        }
+            accumulate(ch.code, parseFloat(ch.factor) || 1);
+
+            // Recopilar partidas hoja del capítulo para precio medio/máximo
+            const leaves = [];
+            function collectLeaves(code) {
+                const c = parsedData.concepts[code];
+                if (!c) return;
+                const kids = getConceptDecomposition(c);
+                if (kids.length === 0 || (!c.code.endsWith('#') && !c.is_root)) {
+                    const p = parseFloat(c.price) || 0;
+                    if (p > 0) leaves.push(p);
+                } else {
+                    kids.forEach(k => collectLeaves(k.code));
+                }
+            }
+            collectLeaves(ch.code);
+
+            const totalCost = (parseFloat(concept.price) || 0) * (parseFloat(ch.factor) || 1);
+            const avgPrice = leaves.length > 0 ? leaves.reduce((a, b) => a + b, 0) / leaves.length : 0;
+            const maxPrice = leaves.length > 0 ? Math.max(...leaves) : 0;
+
+            chapters.push({
+                summary: (concept.summary || concept.code).substring(0, 20),
+                cost: totalCost,
+                mo, maq, mat, sub,
+                avgPrice, maxPrice,
+                numLeaves: leaves.length
+            });
+        });
     });
 
-    const ctx2 = document.getElementById('chaptersCostChart').getContext('2d');
-    chaptersChartInstance = new Chart(ctx2, {
-        type: 'bar',
-        data: {
-            labels: topCaps.map(c => c.summary.substring(0, 25) + (c.summary.length > 25 ? '...' : '')),
-            datasets: [{
-                label: 'Coste en Euros (€)',
-                data: topCaps.map(c => c.cost),
-                backgroundColor: '#800020',
-                borderRadius: 4
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: { ticks: { color: labelColor } },
-                y: { ticks: { color: labelColor } }
-            }
+    chapters.sort((a, b) => b.cost - a.cost);
+    const top = chapters.slice(0, 8);
+    const topLabels = top.map(c => c.summary);
+
+    // ─── Total partidas hoja del presupuesto ───
+    let totalLeaves = 0, allPrices = [];
+    Object.values(parsedData.concepts).forEach(c => {
+        const kids = getConceptDecomposition(c);
+        if (kids.length === 0 && !c.code.endsWith('#') && !c.is_root) {
+            const p = parseFloat(c.price) || 0;
+            if (p > 0) { totalLeaves++; allPrices.push(p); }
         }
     });
+    const globalAvg = allPrices.length > 0 ? allPrices.reduce((a, b) => a + b, 0) / allPrices.length : 0;
+    const globalMax = allPrices.length > 0 ? Math.max(...allPrices) : 0;
+    const totalBudget = Object.values(parsedData.concepts)
+        .filter(c => c.is_root || c.code.endsWith('#'))
+        .reduce((s, c) => s + (parseFloat(c.price) || 0), 0);
+    const totalPEM = chapters.reduce((s, c) => s + c.cost, 0);
+    const moTotal = dist.MO, maqTotal = dist.MAQ, matTotal = dist.MAT, subTotal = dist.SUB;
+    const costTotal = moTotal + maqTotal + matTotal + subTotal || 1;
+    const pctMO = (moTotal / costTotal * 100).toFixed(1);
+    const pctMat = (matTotal / costTotal * 100).toFixed(1);
+    const pctMaq = (maqTotal / costTotal * 100).toFixed(1);
+
+    // ─── KPI Strip ───
+    const strip = document.getElementById('dbKpiStrip');
+    if (strip) {
+        const kpis = [
+            { icon: '💶', label: 'PEM Total', val: totalPEM.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €' },
+            { icon: '📂', label: 'Capítulos', val: chapters.length },
+            { icon: '📋', label: 'Partidas', val: totalLeaves },
+            { icon: '📐', label: 'Precio Medio', val: globalAvg.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €' },
+            { icon: '🔝', label: 'Precio Máx.', val: globalMax.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €' },
+            { icon: '👷', label: '% Mano Obra', val: pctMO + '%' },
+            { icon: '🏗️', label: '% Materiales', val: pctMat + '%' },
+            { icon: '⚙️', label: '% Maquinaria', val: pctMaq + '%' },
+        ];
+        strip.innerHTML = kpis.map(k =>
+            `<div class="db-kpi-card"><span class="db-kpi-icon">${k.icon}</span><span class="db-kpi-label">${k.label}</span><span class="db-kpi-val">${k.val}</span></div>`
+        ).join('');
+    }
+
+    // ─── Destruir instancias previas ───
+    ['typeChartInstance','chaptersChartInstance','chapterBreakdownChart','priceAvgMaxChart','priceRangeChart','weightPieChart'].forEach(key => {
+        if (window[key]) { try { window[key].destroy(); } catch(e){} window[key] = null; }
+    });
+
+    const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+
+    // 1. Doughnut - Distribución por tipo de coste
+    const ctx1 = document.getElementById('resourceTypeChart');
+    if (ctx1) {
+        typeChartInstance = new Chart(ctx1.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Mano de Obra', 'Maquinaria', 'Materiales', 'Subcontratas/Otros'],
+                datasets: [{ data: [dist.MO, dist.MAQ, dist.MAT, dist.SUB],
+                    backgroundColor: ['#ef4444','#f59e0b','#3b82f6','#a855f7'], borderWidth: 2 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom', labels: { color: labelColor, padding: 12 } },
+                    tooltip: { callbacks: { label: ctx => {
+                        const v = ctx.parsed; const t = ctx.dataset.data.reduce((a,b)=>a+b,0)||1;
+                        return ` ${ctx.label}: ${v.toLocaleString('es-ES',{minimumFractionDigits:2})} € (${(v/t*100).toFixed(1)}%)`;
+                    }}}}}
+        });
+    }
+
+    // 2. Bar horizontal - Top capítulos por peso
+    const ctx2 = document.getElementById('chaptersCostChart');
+    if (ctx2) {
+        chaptersChartInstance = new Chart(ctx2.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: topLabels,
+                datasets: [{ label: 'Coste (€)', data: top.map(c => c.cost),
+                    backgroundColor: top.map((_, i) => COLORS[i % COLORS.length]), borderRadius: 4 }]
+            },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { ticks: { color: labelColor }, grid: { color: gridColor } },
+                    y: { ticks: { color: labelColor } } } }
+        });
+    }
+
+    // 3. Stacked bar - MO/MAQ/MAT por capítulo
+    const ctx3 = document.getElementById('chapterBreakdownChart');
+    if (ctx3) {
+        window.chapterBreakdownChart = new Chart(ctx3.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: topLabels,
+                datasets: [
+                    { label: 'Mano Obra', data: top.map(c => c.mo), backgroundColor: '#ef4444', borderRadius: 2 },
+                    { label: 'Maquinaria', data: top.map(c => c.maq), backgroundColor: '#f59e0b', borderRadius: 2 },
+                    { label: 'Materiales', data: top.map(c => c.mat), backgroundColor: '#3b82f6', borderRadius: 2 },
+                    { label: 'Otros/Sub.', data: top.map(c => c.sub), backgroundColor: '#a855f7', borderRadius: 2 },
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                scales: { x: { stacked: true, ticks: { color: labelColor }, grid: { color: gridColor } },
+                    y: { stacked: true, ticks: { color: labelColor }, grid: { color: gridColor } } },
+                plugins: { legend: { labels: { color: labelColor } } } }
+        });
+    }
+
+    // 4. Line/Bar combo - Precio medio y máximo por capítulo
+    const ctx4 = document.getElementById('priceAvgMaxChart');
+    if (ctx4) {
+        window.priceAvgMaxChart = new Chart(ctx4.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: topLabels,
+                datasets: [
+                    { type: 'bar', label: 'Precio Máx. (€)', data: top.map(c => c.maxPrice),
+                        backgroundColor: 'rgba(239,68,68,0.5)', borderColor: '#ef4444', borderWidth: 1, borderRadius: 4 },
+                    { type: 'line', label: 'Precio Medio (€)', data: top.map(c => c.avgPrice),
+                        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.15)',
+                        fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#10b981' },
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                scales: { x: { ticks: { color: labelColor }, grid: { color: gridColor } },
+                    y: { ticks: { color: labelColor }, grid: { color: gridColor } } },
+                plugins: { legend: { labels: { color: labelColor } } } }
+        });
+    }
+
+    // 5. Histogram - Distribución por rango de precio
+    const ctx5 = document.getElementById('priceRangeChart');
+    if (ctx5) {
+        const ranges = [[0,10],[10,50],[50,200],[200,500],[500,1000],[1000,5000],[5000,Infinity]];
+        const rangeLabels = ['<10€','10–50€','50–200€','200–500€','500–1k€','1k–5k€','>5k€'];
+        const counts = ranges.map(([lo, hi]) => allPrices.filter(p => p >= lo && p < hi).length);
+        window.priceRangeChart = new Chart(ctx5.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: rangeLabels,
+                datasets: [{ label: 'Nº de Partidas', data: counts,
+                    backgroundColor: COLORS, borderRadius: 4 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { ticks: { color: labelColor }, grid: { color: gridColor } },
+                    y: { ticks: { color: labelColor, stepSize: 1 }, grid: { color: gridColor } } } }
+        });
+    }
+
+    // 6. Pie - Peso económico por capítulo
+    const ctx6 = document.getElementById('weightPieChart');
+    if (ctx6) {
+        window.weightPieChart = new Chart(ctx6.getContext('2d'), {
+            type: 'pie',
+            data: {
+                labels: chapters.map(c => c.summary),
+                datasets: [{ data: chapters.map(c => c.cost),
+                    backgroundColor: chapters.map((_, i) => COLORS[i % COLORS.length]), borderWidth: 1 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'right', labels: { color: labelColor, boxWidth: 12, padding: 8 } },
+                    tooltip: { callbacks: { label: ctx => {
+                        const v = ctx.parsed; const t = chapters.reduce((a,c)=>a+c.cost,0)||1;
+                        return ` ${ctx.label}: ${v.toLocaleString('es-ES',{minimumFractionDigits:2})} € (${(v/t*100).toFixed(1)}%)`;
+                    }}}}}
+        });
+    }
 }
 
 // 5. Comparador: Estadísticas de Diferencias
@@ -2215,6 +2692,27 @@ if (compareBtn && compareModal && closeCompareBtn) {
     window.addEventListener('click', (e) => {
         if (e.target === compareModal) {
             compareModal.style.display = 'none';
+        }
+    });
+}
+
+// Info modal toggling
+const infoBtn = document.getElementById('infoBtn');
+const infoModal = document.getElementById('infoModal');
+const closeInfoBtn = document.getElementById('closeInfoBtn');
+
+if (infoBtn && infoModal && closeInfoBtn) {
+    infoBtn.addEventListener('click', () => {
+        infoModal.style.display = 'flex';
+    });
+
+    closeInfoBtn.addEventListener('click', () => {
+        infoModal.style.display = 'none';
+    });
+
+    window.addEventListener('click', (e) => {
+        if (e.target === infoModal) {
+            infoModal.style.display = 'none';
         }
     });
 }
@@ -2494,8 +2992,9 @@ let ganttState = {};
 let ganttTasks = [];
 let ganttStartDate = new Date();
 let ganttTotalWeeks = 26;
-const GANTT_WEEK_PX = 44; // ancho de cada semana en px
-let ganttLeftColWidth = 280;  // ancho columna tareas en px (redimensionable)
+let GANTT_COL_PX = 44; // ancho de cada columna en px (redimensionable por zoom slider)
+let ganttViewMode = 'weeks'; // escala de tiempo: 'days', 'weeks', 'months'
+let ganttLeftColWidth = 460;  // ancho columna tareas en px (redimensionable)
 let ganttColDrag = null;       // estado drag de la columna
 
 // Clave localStorage basada en el nombre del fichero cargado
@@ -2565,12 +3064,14 @@ function getGanttTasks() {
 
 // Distribución inicial automática (proporcional al coste)
 function initGanttStateAuto(tasks, totalWeeks) {
-    const total = tasks.filter(t => t.depth === 1).reduce((s, t) => s + t.price, 0) || 1;
+    // depth=2 son los capítulos reales; depth=1 es el nodo raíz único del proyecto BC3
+    let chapterDepth = tasks.some(t => t.depth === 2) ? 2 : 1;
+    const total = tasks.filter(t => t.depth === chapterDepth).reduce((s, t) => s + t.price, 0) || 1;
     let cursor = 1;
 
     tasks.forEach(task => {
         if (ganttState[task.id]) return; // ya guardado
-        if (task.depth === 1) {
+        if (task.depth === chapterDepth) {
             const proportion = task.price / total;
             const dur = Math.max(1, Math.round(proportion * totalWeeks));
             ganttState[task.id] = { startWeek: cursor, durationWeeks: dur, collapsed: false };
@@ -2578,10 +3079,10 @@ function initGanttStateAuto(tasks, totalWeeks) {
         }
     });
 
-    // Subcapítulos: distribuidos dentro del padre
+    // Subcapítulos y partidas: distribuidos dentro del padre
     tasks.forEach(task => {
         if (ganttState[task.id]) return;
-        if (task.depth > 1 && task.parentId && ganttState[task.parentId]) {
+        if (task.depth > chapterDepth && task.parentId && ganttState[task.parentId]) {
             const parent = ganttState[task.parentId];
             const siblings = tasks.filter(t => t.parentId === task.parentId);
             const idx = siblings.indexOf(task);
@@ -2592,6 +3093,14 @@ function initGanttStateAuto(tasks, totalWeeks) {
                 durationWeeks: dur,
                 collapsed: false
             };
+        }
+    });
+
+    // Inicializar el nodo raíz si existe (depth < chapterDepth)
+    tasks.forEach(task => {
+        if (ganttState[task.id]) return;
+        if (task.depth < chapterDepth) {
+            ganttState[task.id] = { startWeek: 1, durationWeeks: totalWeeks, collapsed: false };
         }
     });
 }
@@ -2614,42 +3123,130 @@ function buildGanttHeader(totalWeeks) {
     const weekRow = document.createElement('div');
     weekRow.className = 'gantt-header-weeks';
 
-    let lastMonth = null;
-    let monthSpan = 0;
-    let monthCells = [];
+    if (ganttViewMode === 'days') {
+        // Modo DÍAS: Fila 1 = Semanas, Fila 2 = Días del mes
+        let lastWeekNum = null;
+        let weekSpan = 0;
+        let weekCells = [];
+        const totalDays = totalWeeks * 7;
 
-    for (let w = 1; w <= totalWeeks; w++) {
-        const date = weekToDate(w);
-        const month = date.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+        for (let d = 1; d <= totalDays; d++) {
+            const date = new Date(ganttStartDate);
+            date.setDate(date.getDate() + (d - 1));
+            const wNum = Math.ceil(d / 7);
 
-        const wCell = document.createElement('div');
-        wCell.className = 'gantt-week-cell';
-        wCell.textContent = 'S' + w;
-        wCell.title = formatDate(date);
-        weekRow.appendChild(wCell);
+            const dCell = document.createElement('div');
+            dCell.className = 'gantt-week-cell';
+            dCell.style.width = GANTT_COL_PX + 'px';
+            dCell.textContent = date.getDate();
+            dCell.title = formatDate(date);
+            weekRow.appendChild(dCell);
 
-        if (month !== lastMonth) {
-            if (lastMonth !== null) {
-                const mCell = document.createElement('div');
-                mCell.className = 'gantt-month-cell';
-                mCell.textContent = lastMonth;
-                mCell.style.width = (monthSpan * GANTT_WEEK_PX) + 'px';
-                monthCells.push(mCell);
+            if (wNum !== lastWeekNum) {
+                if (lastWeekNum !== null) {
+                    const mCell = document.createElement('div');
+                    mCell.className = 'gantt-month-cell';
+                    mCell.textContent = 'Semana ' + lastWeekNum;
+                    mCell.style.width = (weekSpan * GANTT_COL_PX) + 'px';
+                    weekCells.push(mCell);
+                }
+                lastWeekNum = wNum;
+                weekSpan = 1;
+            } else {
+                weekSpan++;
             }
-            lastMonth = month;
-            monthSpan = 1;
-        } else {
-            monthSpan++;
         }
+        if (lastWeekNum) {
+            const mCell = document.createElement('div');
+            mCell.className = 'gantt-month-cell';
+            mCell.textContent = 'Semana ' + lastWeekNum;
+            mCell.style.width = (weekSpan * GANTT_COL_PX) + 'px';
+            weekCells.push(mCell);
+        }
+        weekCells.forEach(c => monthRow.appendChild(c));
+
+    } else if (ganttViewMode === 'months') {
+        // Modo MESES: Fila 1 = Años, Fila 2 = Nombres de mes
+        const totalMonths = Math.ceil(totalWeeks / 4);
+        let lastYear = null;
+        let yearSpan = 0;
+        let yearCells = [];
+
+        for (let m = 1; m <= totalMonths; m++) {
+            const date = new Date(ganttStartDate);
+            date.setMonth(date.getMonth() + (m - 1));
+            const year = date.getFullYear();
+
+            const mCell = document.createElement('div');
+            mCell.className = 'gantt-week-cell';
+            mCell.style.width = GANTT_COL_PX + 'px';
+            mCell.textContent = date.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '');
+            mCell.title = date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+            weekRow.appendChild(mCell);
+
+            if (year !== lastYear) {
+                if (lastYear !== null) {
+                    const yCell = document.createElement('div');
+                    yCell.className = 'gantt-month-cell';
+                    yCell.textContent = lastYear;
+                    yCell.style.width = (yearSpan * GANTT_COL_PX) + 'px';
+                    yearCells.push(yCell);
+                }
+                lastYear = year;
+                yearSpan = 1;
+            } else {
+                yearSpan++;
+            }
+        }
+        if (lastYear) {
+            const yCell = document.createElement('div');
+            yCell.className = 'gantt-month-cell';
+            yCell.textContent = lastYear;
+            yCell.style.width = (yearSpan * GANTT_COL_PX) + 'px';
+            yearCells.push(yCell);
+        }
+        yearCells.forEach(c => monthRow.appendChild(c));
+
+    } else {
+        // Modo SEMANAS (Predeterminado)
+        let lastMonth = null;
+        let monthSpan = 0;
+        let monthCells = [];
+
+        for (let w = 1; w <= totalWeeks; w++) {
+            const date = weekToDate(w);
+            const month = date.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+
+            const wCell = document.createElement('div');
+            wCell.className = 'gantt-week-cell';
+            wCell.style.width = GANTT_COL_PX + 'px';
+            wCell.textContent = 'S' + w;
+            wCell.title = formatDate(date);
+            weekRow.appendChild(wCell);
+
+            if (month !== lastMonth) {
+                if (lastMonth !== null) {
+                    const mCell = document.createElement('div');
+                    mCell.className = 'gantt-month-cell';
+                    mCell.textContent = lastMonth;
+                    mCell.style.width = (monthSpan * GANTT_COL_PX) + 'px';
+                    monthCells.push(mCell);
+                }
+                lastMonth = month;
+                monthSpan = 1;
+            } else {
+                monthSpan++;
+            }
+        }
+        if (lastMonth) {
+            const mCell = document.createElement('div');
+            mCell.className = 'gantt-month-cell';
+            mCell.textContent = lastMonth;
+            mCell.style.width = (monthSpan * GANTT_COL_PX) + 'px';
+            monthCells.push(mCell);
+        }
+        monthCells.forEach(c => monthRow.appendChild(c));
     }
-    if (lastMonth) {
-        const mCell = document.createElement('div');
-        mCell.className = 'gantt-month-cell';
-        mCell.textContent = lastMonth;
-        mCell.style.width = (monthSpan * GANTT_WEEK_PX) + 'px';
-        monthCells.push(mCell);
-    }
-    monthCells.forEach(c => monthRow.appendChild(c));
 
     return { monthRow, weekRow };
 }
@@ -2664,6 +3261,24 @@ function renderPlanningModal() {
         ganttState = {};
         initGanttStateAuto(ganttTasks, ganttTotalWeeks);
         ganttSave();
+    } else {
+        recalculateParentTasks();
+        recalculateParentProgress();
+    }
+
+    // Sincronizar el input de fecha con la fecha real cargada
+    const ganttStartDateInput = document.getElementById('ganttStartDate');
+    if (ganttStartDateInput) {
+        const year = ganttStartDate.getFullYear();
+        const month = String(ganttStartDate.getMonth() + 1).padStart(2, '0');
+        const day = String(ganttStartDate.getDate()).padStart(2, '0');
+        ganttStartDateInput.value = `${year}-${month}-${day}`;
+    }
+
+    // Sincronizar las semanas con el input
+    const ganttWeeksInput = document.getElementById('ganttWeeks');
+    if (ganttWeeksInput) {
+        ganttWeeksInput.value = ganttTotalWeeks;
     }
 
     const modal = document.getElementById('planningModal');
@@ -2673,12 +3288,195 @@ function renderPlanningModal() {
     rebuildGanttDOM();
 }
 
+// Recalcular dinámicamente las fechas de los capítulos (padres) basándose en sus hijos
+function recalculateParentTasks() {
+    if (!ganttTasks || ganttTasks.length === 0) return;
+    
+    // depth=1: nodo raíz global; depth=2: capítulos; depth=3: sub-capítulos/partidas
+    // Procesar de abajo hacia arriba: 3 → 2 → 1
+    for (let d = 3; d >= 1; d--) {
+        ganttTasks.forEach(task => {
+            if (task.depth === d && task.hasKids) {
+                const children = ganttTasks.filter(c => c.parentId === task.id);
+                if (children.length > 0) {
+                    let minStart = 9999;
+                    let maxEnd = 0;
+                    
+                    children.forEach(c => {
+                        const cSt = ganttState[c.id];
+                        if (cSt) {
+                            if (cSt.startWeek < minStart) minStart = cSt.startWeek;
+                            const cEnd = cSt.startWeek + cSt.durationWeeks;
+                            if (cEnd > maxEnd) maxEnd = cEnd;
+                        }
+                    });
+                    
+                    if (minStart !== 9999 && maxEnd > 0) {
+                        if (!ganttState[task.id]) {
+                            ganttState[task.id] = { collapsed: false };
+                        }
+                        ganttState[task.id].startWeek = minStart;
+                        ganttState[task.id].durationWeeks = Math.max(1, maxEnd - minStart);
+                    }
+                }
+            }
+        });
+    }
+}
+
+// Calcular el camino crítico entre los capítulos reales (depth === 2)
+function getCriticalPath() {
+    const criticalIds = new Set();
+    if (!ganttTasks || ganttTasks.length === 0) return criticalIds;
+    
+    // Los capítulos reales están en depth=2 (depth=1 es el nodo raíz del proyecto)
+    let chapters = ganttTasks.filter(t => t.depth === 2);
+    if (chapters.length === 0) chapters = ganttTasks.filter(t => t.depth === 1); // fallback
+    if (chapters.length === 0) return criticalIds;
+    
+    // Encontrar la semana de fin máxima de entre todos los capítulos
+    let maxEnd = 0;
+    chapters.forEach(t => {
+        const st = ganttState[t.id];
+        if (st) {
+            const end = st.startWeek + st.durationWeeks;
+            if (end > maxEnd) maxEnd = end;
+        }
+    });
+    
+    if (maxEnd === 0) return criticalIds;
+    
+    // Empezar con los capítulos que terminan en maxEnd
+    const endChapters = chapters.filter(t => {
+        const st = ganttState[t.id];
+        return st && (st.startWeek + st.durationWeeks === maxEnd);
+    });
+    
+    endChapters.forEach(t => criticalIds.add(t.id));
+    
+    // Trazar hacia atrás recursivamente
+    let changed = true;
+    while (changed) {
+        changed = false;
+        chapters.forEach(t => {
+            if (criticalIds.has(t.id)) return;
+            
+            const st = ganttState[t.id];
+            if (!st) return;
+            
+            const tEnd = st.startWeek + st.durationWeeks;
+            
+            // Si termina exactamente cuando empieza una tarea crítica (o con 1 semana de tolerancia)
+            for (let cId of criticalIds) {
+                const cSt = ganttState[cId];
+                if (!cSt) continue;
+                
+                if (tEnd >= cSt.startWeek - 1 && tEnd <= cSt.startWeek && st.startWeek < cSt.startWeek) {
+                    criticalIds.add(t.id);
+                    changed = true;
+                    break;
+                }
+            }
+        });
+    }
+    
+    return criticalIds;
+}
+
+// Recalcular dinámicamente el progreso de los capítulos basándose en la media ponderada por coste de sus hijos
+function recalculateParentProgress() {
+    if (!ganttTasks || ganttTasks.length === 0) return;
+    
+    // depth=3→2→1: procesar de abajo hacia arriba para cubrir toda la jerarquía BC3
+    for (let d = 3; d >= 1; d--) {
+        ganttTasks.forEach(task => {
+            if (task.depth === d && task.hasKids) {
+                const children = ganttTasks.filter(c => c.parentId === task.id);
+                if (children.length > 0) {
+                    let totalPrice = 0;
+                    let executedPrice = 0;
+                    children.forEach(c => {
+                        const cSt = ganttState[c.id];
+                        const price = c.price || 0;
+                        const prog = cSt ? (cSt.progress || 0) : 0;
+                        totalPrice += price;
+                        executedPrice += price * (prog / 100);
+                    });
+                    if (!ganttState[task.id]) {
+                        ganttState[task.id] = { collapsed: false };
+                    }
+                    ganttState[task.id].progress = totalPrice > 0 
+                        ? Math.round((executedPrice / totalPrice) * 100) 
+                        : 0;
+                }
+            }
+        });
+    }
+}
+
+// Aplicar progreso de forma recursiva a todos los descendientes
+function applyProgressToDescendants(pId, prog) {
+    ganttTasks.forEach(c => {
+        if (c.parentId === pId) {
+            if (!ganttState[c.id]) ganttState[c.id] = {};
+            ganttState[c.id].progress = prog;
+            if (c.hasKids) {
+                applyProgressToDescendants(c.id, prog);
+            }
+        }
+    });
+}
+
 function rebuildGanttDOM() {
     const container = document.getElementById('ganttContainer');
     if (!container) return;
     container.innerHTML = '';
 
     const totalWeeks = ganttTotalWeeks;
+    
+    // 1. Recalcular las fechas y avances automáticos de los capítulos
+    recalculateParentTasks();
+    recalculateParentProgress();
+    
+    // 2. Obtener la ruta crítica actual (solo capítulos)
+    const criticalPathSet = getCriticalPath();
+
+    // 3. Rellenar el panel resumen superior (KPIs)
+    const summaryBar = document.getElementById('ganttSummaryBar');
+    if (summaryBar) {
+        // Los capítulos reales son depth=2 (depth=1 es el nodo raíz único del proyecto)
+        let chapters = ganttTasks.filter(t => t.depth === 2);
+        if (chapters.length === 0) chapters = ganttTasks.filter(t => t.depth === 1);
+        const totalChapters = chapters.length;
+        
+        let totalPrice = 0;
+        let executedPrice = 0;
+        chapters.forEach(c => {
+            const st = ganttState[c.id];
+            const price = c.price || 0;
+            const prog = st ? (st.progress || 0) : 0;
+            totalPrice += price;
+            executedPrice += price * (prog / 100);
+        });
+        
+        const globalProg = totalPrice > 0 ? ((executedPrice / totalPrice) * 100).toFixed(1) : '0.0';
+        const totalDays = totalWeeks * 7;
+        
+        summaryBar.innerHTML = `
+            <div class="gantt-kpi-card">
+                <span class="gantt-kpi-label">Capítulos</span>
+                <span class="gantt-kpi-val">${totalChapters}</span>
+            </div>
+            <div class="gantt-kpi-card">
+                <span class="gantt-kpi-label">Plazo Total</span>
+                <span class="gantt-kpi-val">${totalWeeks} semanas <small style="font-size:0.7em; color:var(--text-secondary);">(${totalDays} días)</small></span>
+            </div>
+            <div class="gantt-kpi-card">
+                <span class="gantt-kpi-label">Avance Global</span>
+                <span class="gantt-kpi-val" style="color: #10b981;">${globalProg}%</span>
+            </div>
+        `;
+    }
 
     // ---- Cabecera grid ----
     const tableWrap = document.createElement('div');
@@ -2690,9 +3488,25 @@ function rebuildGanttDOM() {
     leftCol.style.width = ganttLeftColWidth + 'px';
     leftCol.style.minWidth = ganttLeftColWidth + 'px';
 
+    // Cabecera estructurada de la columna izquierda (Tarea, Plazo Restante, % Ejecutado)
     const leftHeader = document.createElement('div');
     leftHeader.className = 'gantt-left-header';
-    leftHeader.textContent = 'Tarea';
+    
+    const hName = document.createElement('span');
+    hName.className = 'gh-col-name';
+    hName.textContent = 'Tarea / Capítulo';
+    
+    const hDays = document.createElement('span');
+    hDays.className = 'gh-col-days';
+    hDays.textContent = 'Restante';
+    
+    const hProgress = document.createElement('span');
+    hProgress.className = 'gh-col-progress';
+    hProgress.textContent = '% Ejec.';
+    
+    leftHeader.appendChild(hName);
+    leftHeader.appendChild(hDays);
+    leftHeader.appendChild(hProgress);
     leftCol.appendChild(leftHeader);
 
     // Handle de resize en el borde derecho de la columna
@@ -2722,6 +3536,44 @@ function rebuildGanttDOM() {
     const bodyWrap = document.createElement('div');
     bodyWrap.className = 'gantt-body';
 
+    // Dibujar la Línea de Hoy (vertical) basada en el HOY real del sistema
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // Normalizar ganttStartDate a medianoche local para evitar desfases de zona horaria
+    const ganttStartNorm = new Date(ganttStartDate);
+    ganttStartNorm.setHours(0, 0, 0, 0);
+    
+    const diffMs = today.getTime() - ganttStartNorm.getTime();
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    const diffWeeks = diffDays / 7;
+    
+    if (diffWeeks >= 0 && diffWeeks <= totalWeeks + 0.5) {
+        const todayLine = document.createElement('div');
+        todayLine.className = 'gantt-today-line';
+        todayLine.id = 'ganttTodayLine';
+        
+        let todayLeft = 0;
+        if (ganttViewMode === 'days') {
+            todayLeft = diffDays * GANTT_COL_PX;
+        } else if (ganttViewMode === 'months') {
+            todayLeft = (diffWeeks / 4) * GANTT_COL_PX;
+        } else { // weeks (default)
+            todayLeft = diffWeeks * GANTT_COL_PX;
+        }
+        todayLine.style.left = todayLeft + 'px';
+        
+        const todayLabel = document.createElement('div');
+        todayLabel.className = 'gantt-today-line-label';
+        const todayStr = today.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+        todayLabel.textContent = `HOY · ${todayStr}`;
+        todayLine.appendChild(todayLabel);
+        
+        bodyWrap.appendChild(todayLine);
+    }
+
+    let renderedRowIndex = -1;
+    const renderedCriticalChapters = [];
+
     ganttTasks.forEach(task => {
         const st = ganttState[task.id];
         if (!st) return;
@@ -2731,76 +3583,260 @@ function rebuildGanttDOM() {
             return;
         }
 
-        // Fila nombre
+        renderedRowIndex++;
+
+        // Registrar coordenadas de capítulos críticos visibles para trazar la línea de conexión
+        if (task.depth === 1 && criticalPathSet.has(task.id)) {
+            renderedCriticalChapters.push({
+                id: task.id,
+                startWeek: st.startWeek,
+                durationWeeks: st.durationWeeks,
+                y: (renderedRowIndex * 34) + 17 // Centro vertical de esta fila
+            });
+        }
+
+        // Fila nombre estructurada
         const nameRow = document.createElement('div');
         nameRow.className = 'gantt-name-row gantt-depth-' + task.depth;
         nameRow.dataset.taskId = task.id;
+
+        // 1. Celda Nombre (con sangría y toggle)
+        const cellName = document.createElement('div');
+        cellName.className = 'gantt-cell-name';
 
         if (task.hasKids) {
             const toggle = document.createElement('span');
             toggle.className = 'gantt-toggle';
             toggle.textContent = st.collapsed ? '▶' : '▼';
-            toggle.addEventListener('click', () => {
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
                 ganttState[task.id].collapsed = !ganttState[task.id].collapsed;
                 ganttSave();
                 rebuildGanttDOM();
             });
-            nameRow.appendChild(toggle);
+            cellName.appendChild(toggle);
         } else {
             const spacer = document.createElement('span');
             spacer.className = 'gantt-toggle-spacer';
-            nameRow.appendChild(spacer);
+            cellName.appendChild(spacer);
         }
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'gantt-task-name';
         nameSpan.title = task.summary + ' — ' + task.price.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
         nameSpan.textContent = task.summary;
-        nameRow.appendChild(nameSpan);
+        
+        // Agregar fueguito si es crítico
+        if (criticalPathSet.has(task.id)) {
+            const fireIcon = document.createElement('span');
+            fireIcon.className = 'critical-badge-icon';
+            fireIcon.textContent = '🔥 ';
+            fireIcon.title = 'Ruta crítica';
+            nameSpan.prepend(fireIcon);
+        }
+        
+        cellName.appendChild(nameSpan);
+        nameRow.appendChild(cellName);
+
+        // 2. Celda Días Restantes (desde Hoy hasta fin de tarea)
+        const cellDays = document.createElement('div');
+        cellDays.className = 'gantt-cell-days';
+        
+        const progressVal = st.progress || 0;
+        if (progressVal === 100) {
+            cellDays.textContent = 'Listo';
+            cellDays.className = 'gantt-cell-days gantt-days-ready';
+        } else {
+            const endD = weekToDate(st.startWeek + st.durationWeeks);
+            endD.setHours(0,0,0,0);
+            
+            const diffMs = endD - today;
+            const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            
+            if (diffDays < 0) {
+                cellDays.textContent = `-${Math.abs(diffDays)} d`;
+                cellDays.className = 'gantt-cell-days gantt-days-delayed';
+                cellDays.title = `Retraso de ${Math.abs(diffDays)} días sobre el plazo previsto`;
+            } else {
+                cellDays.textContent = `${diffDays} d`;
+                cellDays.className = 'gantt-cell-days gantt-days-normal';
+                cellDays.title = `Faltan ${diffDays} días para finalizar el plazo`;
+            }
+        }
+        nameRow.appendChild(cellDays);
+
+        // 3. Celda % Ejecutado con botones + y -
+        const cellProgress = document.createElement('div');
+        cellProgress.className = 'gantt-cell-progress';
+        
+        const btnDec = document.createElement('button');
+        btnDec.type = 'button';
+        btnDec.className = 'gantt-prog-btn';
+        btnDec.textContent = '-';
+        btnDec.title = 'Restar 10% de avance';
+        btnDec.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const curr = st.progress || 0;
+            const targetProg = Math.max(0, curr - 10);
+            st.progress = targetProg;
+            if (task.hasKids) {
+                applyProgressToDescendants(task.id, targetProg);
+            }
+            recalculateParentProgress();
+            ganttSave();
+            rebuildGanttDOM();
+        });
+        
+        const labelProg = document.createElement('span');
+        labelProg.className = 'gantt-prog-val';
+        labelProg.textContent = progressVal + '%';
+        
+        const btnInc = document.createElement('button');
+        btnInc.type = 'button';
+        btnInc.className = 'gantt-prog-btn';
+        btnInc.textContent = '+';
+        btnInc.title = 'Sumar 10% de avance';
+        btnInc.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const curr = st.progress || 0;
+            const targetProg = Math.min(100, curr + 10);
+            st.progress = targetProg;
+            if (task.hasKids) {
+                applyProgressToDescendants(task.id, targetProg);
+            }
+            recalculateParentProgress();
+            ganttSave();
+            rebuildGanttDOM();
+        });
+        
+        cellProgress.appendChild(btnDec);
+        cellProgress.appendChild(labelProg);
+        cellProgress.appendChild(btnInc);
+        nameRow.appendChild(cellProgress);
+
         leftCol.appendChild(nameRow);
 
-        // Fila barra
+        // Fila barra en timeline
         const barRow = document.createElement('div');
         barRow.className = 'gantt-bar-row';
-        barRow.style.width = (totalWeeks * GANTT_WEEK_PX) + 'px';
+        
+        let colsCount = totalWeeks;
+        if (ganttViewMode === 'days') colsCount = totalWeeks * 7;
+        else if (ganttViewMode === 'months') colsCount = Math.ceil(totalWeeks / 4);
+        
+        barRow.style.width = (colsCount * GANTT_COL_PX) + 'px';
         barRow.dataset.taskId = task.id;
 
-        // Grid de fondo
-        for (let w = 1; w <= totalWeeks; w++) {
+        // Grid de fondo según la escala
+        for (let w = 1; w <= colsCount; w++) {
             const cell = document.createElement('div');
             cell.className = 'gantt-bg-cell' + (w % 4 === 0 ? ' gantt-bg-month-end' : '');
+            cell.style.width = GANTT_COL_PX + 'px';
             barRow.appendChild(cell);
         }
 
         // Barra de la tarea
         const bar = document.createElement('div');
         bar.className = 'gantt-bar gantt-bar-depth-' + task.depth;
+        if (criticalPathSet.has(task.id)) {
+            bar.classList.add('gantt-bar-critical');
+        }
         bar.dataset.taskId = task.id;
         positionBar(bar, st.startWeek, st.durationWeeks, totalWeeks);
 
-        const resizeL = document.createElement('div');
-        resizeL.className = 'gantt-resize gantt-resize-l';
-        resizeL.addEventListener('mousedown', e => startGanttDrag(e, task.id, 'left'));
+        // Capa interna de progreso acumulado
+        if (progressVal > 0) {
+            const progBar = document.createElement('div');
+            progBar.className = 'gantt-bar-progress';
+            progBar.style.width = progressVal + '%';
+            bar.appendChild(progBar);
+        }
 
         const barLabel = document.createElement('span');
         barLabel.className = 'gantt-bar-label';
+        barLabel.style.position = 'relative';
+        barLabel.style.zIndex = '2';
         barLabel.textContent = task.summary.length > 18 ? task.summary.slice(0, 16) + '…' : task.summary;
 
-        const resizeR = document.createElement('div');
-        resizeR.className = 'gantt-resize gantt-resize-r';
-        resizeR.addEventListener('mousedown', e => startGanttDrag(e, task.id, 'right'));
+        if (task.hasKids) {
+            // Estilo barra de capítulo (Summary Bar) - deshabilitar drag y redimensionamiento
+            bar.classList.add('gantt-bar-parent');
+            bar.appendChild(barLabel);
+        } else {
+            // Partida o Subcapítulo editable: inyectar manejadores de arrastre
+            const resizeL = document.createElement('div');
+            resizeL.className = 'gantt-resize gantt-resize-l';
+            resizeL.style.position = 'relative';
+            resizeL.style.zIndex = '2';
+            resizeL.addEventListener('mousedown', e => startGanttDrag(e, task.id, 'left'));
 
-        bar.appendChild(resizeL);
-        bar.appendChild(barLabel);
-        bar.appendChild(resizeR);
-        bar.addEventListener('mousedown', e => {
-            if (e.target === resizeL || e.target === resizeR) return;
-            startGanttDrag(e, task.id, 'move');
-        });
+            const resizeR = document.createElement('div');
+            resizeR.className = 'gantt-resize gantt-resize-r';
+            resizeR.style.position = 'relative';
+            resizeR.style.zIndex = '2';
+            resizeR.addEventListener('mousedown', e => startGanttDrag(e, task.id, 'right'));
+
+            bar.appendChild(resizeL);
+            bar.appendChild(barLabel);
+            bar.appendChild(resizeR);
+            bar.addEventListener('mousedown', e => {
+                if (ganttLinkMode) return; // link mode: no drag, let click handle it
+                if (e.target === resizeL || e.target === resizeR) return;
+                startGanttDrag(e, task.id, 'move');
+            });
+            // Click listener específico para modo enlace en barras hoja
+            bar.addEventListener('click', e => {
+                if (!ganttLinkMode) return;
+                e.stopPropagation();
+                handleLinkModeClick(task.id, bar);
+            });
+        }
 
         barRow.appendChild(bar);
         bodyWrap.appendChild(barRow);
     });
+
+    // 4. Dibujar las líneas SVG de conexión entre capítulos críticos consecutivos
+    if (renderedCriticalChapters.length > 1) {
+        // Ordenar secuencialmente por semana de inicio
+        renderedCriticalChapters.sort((a, b) => a.startWeek - b.startWeek);
+
+        const svgNS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("class", "gantt-svg-overlay");
+        
+        let colsCount = totalWeeks;
+        if (ganttViewMode === 'days') colsCount = totalWeeks * 7;
+        else if (ganttViewMode === 'months') colsCount = Math.ceil(totalWeeks / 4);
+        svg.style.width = (colsCount * GANTT_COL_PX) + 'px';
+
+        for (let i = 0; i < renderedCriticalChapters.length - 1; i++) {
+            const A = renderedCriticalChapters[i];
+            const B = renderedCriticalChapters[i + 1];
+
+            const coordsA = getGanttBarCoords(A);
+            const xA = coordsA.left + coordsA.width;
+            const yA = A.y;
+
+            const coordsB = getGanttBarCoords(B);
+            const xB = coordsB.left;
+            const yB = B.y;
+
+            const xMid = xA + (xB - xA) / 2;
+
+            const path = document.createElementNS(svgNS, "path");
+            // Trazado escalonado: horizontal, vertical, horizontal
+            const dAttr = `M ${xA} ${yA} L ${xMid} ${yA} L ${xMid} ${yB} L ${xB} ${yB}`;
+            path.setAttribute("d", dAttr);
+            path.setAttribute("stroke", "#f97316"); // Naranja de ruta crítica
+            path.setAttribute("stroke-width", "2");
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke-dasharray", "4,4"); // Estilo línea discontinua
+
+            svg.appendChild(path);
+        }
+        bodyWrap.appendChild(svg);
+    }
 
     rightCol.appendChild(bodyWrap);
     tableWrap.appendChild(leftCol);
@@ -2808,13 +3844,31 @@ function rebuildGanttDOM() {
     container.appendChild(tableWrap);
 
     // Sincronizar scroll vertical entre columnas
-    const rightScroll = rightCol.querySelector('.gantt-body') || rightCol;
     leftCol.addEventListener('scroll', () => { rightCol.scrollTop = leftCol.scrollTop; });
 }
 
+// Calcular coordenadas izquierda y ancho de barra según el zoom y la escala activa
+function getGanttBarCoords(st) {
+    let left = 0;
+    let width = 0;
+    
+    if (ganttViewMode === 'days') {
+        left = (st.startWeek - 1) * 7 * GANTT_COL_PX;
+        width = Math.max(GANTT_COL_PX * 0.5, (st.durationWeeks * 7) * GANTT_COL_PX - 2);
+    } else if (ganttViewMode === 'months') {
+        left = ((st.startWeek - 1) / 4) * GANTT_COL_PX;
+        width = Math.max(GANTT_COL_PX * 0.5, (st.durationWeeks / 4) * GANTT_COL_PX - 2);
+    } else {
+        // semanas
+        left = (st.startWeek - 1) * GANTT_COL_PX;
+        width = Math.max(GANTT_COL_PX * 0.5, st.durationWeeks * GANTT_COL_PX - 2);
+    }
+    
+    return { left, width };
+}
+
 function positionBar(barEl, startWeek, durationWeeks, totalWeeks) {
-    const left = (startWeek - 1) * GANTT_WEEK_PX;
-    const width = Math.max(GANTT_WEEK_PX * 0.5, durationWeeks * GANTT_WEEK_PX - 2);
+    const { left, width } = getGanttBarCoords({ startWeek, durationWeeks });
     barEl.style.left = left + 'px';
     barEl.style.width = width + 'px';
 }
@@ -2841,17 +3895,23 @@ function stopGanttColResize() {
 let ganttDrag = null;
 
 function startGanttDrag(e, taskId, mode) {
+    // En modo enlace: no iniciar drag, dejar que el click se propague
+    if (ganttLinkMode) return;
+
     e.preventDefault();
     e.stopPropagation();
     const st = ganttState[taskId];
     if (!st) return;
 
-    // Buscar el parentId de esta tarea para aplicar clamping jerárquico
     const taskObj = ganttTasks.find(t => t.id === taskId);
-    const parentId = taskObj ? taskObj.parentId : null;
+    // Las barras de capítulo (hasKids) son automáticas — no se arrastran directamente.
+    // Solo se pueden arrastrar partidas hoja (sin hijos).
+    if (taskObj && taskObj.hasKids) return;
 
     ganttDrag = {
-        taskId, mode, parentId,
+        taskId,
+        parentId: taskObj ? taskObj.parentId : null,
+        mode,
         startX: e.clientX,
         origStart: st.startWeek,
         origDur: st.durationWeeks
@@ -2863,42 +3923,71 @@ function startGanttDrag(e, taskId, mode) {
 
 function doGanttDrag(e) {
     if (!ganttDrag) return;
-    const { taskId, mode, parentId, startX, origStart, origDur } = ganttDrag;
+    const { taskId, mode, startX, origStart, origDur } = ganttDrag;
     const dx = e.clientX - startX;
-    const weeksDelta = Math.round(dx / GANTT_WEEK_PX);
+
+    let weeksDelta = 0;
+    if (ganttViewMode === 'days') {
+        weeksDelta = Math.round(dx / GANTT_COL_PX) / 7;
+    } else if (ganttViewMode === 'months') {
+        weeksDelta = Math.round(dx / GANTT_COL_PX) * 4;
+    } else {
+        weeksDelta = Math.round(dx / GANTT_COL_PX);
+    }
+
     const st = ganttState[taskId];
     const total = ganttTotalWeeks;
 
-    // Límites del padre (si existe) — la tarea hija nunca puede salir de ellos
-    const pst = parentId && ganttState[parentId];
-    const pMin = pst ? pst.startWeek : 1;
-    const pMax = pst ? pst.startWeek + pst.durationWeeks - 1 : total;
-
+    // Sin clamping por el padre — las tareas se mueven libremente dentro del proyecto.
+    // Los capítulos (padres) se recalculan automáticamente al soltar para adaptarse.
     if (mode === 'move') {
-        const raw = Math.max(pMin, Math.min(pMax - origDur + 1, origStart + weeksDelta));
-        st.startWeek = raw;
-        st.durationWeeks = Math.min(origDur, pMax - raw + 1);
+        st.startWeek = Math.max(1, Math.min(total - origDur + 1, origStart + weeksDelta));
+        st.durationWeeks = origDur;
     } else if (mode === 'right') {
-        const maxDur = pMax - st.startWeek + 1;
-        st.durationWeeks = Math.max(1, Math.min(maxDur, origDur + weeksDelta));
+        st.durationWeeks = Math.max(1, Math.min(total - st.startWeek + 1, origDur + weeksDelta));
     } else if (mode === 'left') {
-        const newStart = Math.max(pMin, Math.min(origStart + origDur - 1, origStart + weeksDelta));
-        const newDur = origStart + origDur - newStart;
+        const newStart = Math.max(1, Math.min(origStart + origDur - 1, origStart + weeksDelta));
         st.startWeek = newStart;
-        st.durationWeeks = Math.max(1, Math.min(newDur, pMax - newStart + 1));
+        st.durationWeeks = Math.max(1, origStart + origDur - newStart);
     }
 
-    // Actualizar barra en DOM sin rerenderizar todo
+    // Actualizar la barra de la tarea en DOM en tiempo real
     const bar = document.querySelector(`.gantt-bar[data-task-id="${taskId}"]`);
     if (bar) positionBar(bar, st.startWeek, st.durationWeeks, total);
+
+    // Recalcular y actualizar visualmente los padres en tiempo real durante el arrastre
+    recalculateParentTasks();
+    const taskObj = ganttTasks.find(t => t.id === taskId);
+    if (taskObj && taskObj.parentId) {
+        updateParentBarsInDOM(taskObj.parentId);
+    }
+}
+
+// Actualiza recursivamente las barras padre en el DOM sin rerenderizar todo
+function updateParentBarsInDOM(parentId) {
+    if (!parentId) return;
+    const pst = ganttState[parentId];
+    if (!pst) return;
+    const pBar = document.querySelector(`.gantt-bar[data-task-id="${parentId}"]`);
+    if (pBar) positionBar(pBar, pst.startWeek, pst.durationWeeks, ganttTotalWeeks);
+
+    // Subir un nivel más si existe abuelo
+    const parentTask = ganttTasks.find(t => t.id === parentId);
+    if (parentTask && parentTask.parentId) {
+        recalculateParentTasks(); // asegurar que el abuelo está actualizado
+        updateParentBarsInDOM(parentTask.parentId);
+    }
 }
 
 function stopGanttDrag() {
     if (!ganttDrag) return;
+    recalculateParentTasks();
+    recalculateParentProgress();
     ganttSave();
     ganttDrag = null;
     document.removeEventListener('mousemove', doGanttDrag);
     document.removeEventListener('mouseup', stopGanttDrag);
+    rebuildGanttDOM();
 }
 
 // ---- Exportar Gantt a Excel (tabla estructurada) ----
@@ -3143,6 +4232,37 @@ if (ganttWeeksInput) {
     });
 }
 
+// Configurar botones de escala (Días, Semanas, Meses)
+const modeDaysBtn = document.getElementById('ganttModeDaysBtn');
+const modeWeeksBtn = document.getElementById('ganttModeWeeksBtn');
+const modeMonthsBtn = document.getElementById('ganttModeMonthsBtn');
+
+function setGanttMode(mode, activeBtn) {
+    ganttViewMode = mode;
+    document.querySelectorAll('.gantt-mode-btn').forEach(btn => btn.classList.remove('active'));
+    if (activeBtn) activeBtn.classList.add('active');
+    if (planningModal && planningModal.style.display !== 'none') rebuildGanttDOM();
+}
+
+if (modeDaysBtn) {
+    modeDaysBtn.addEventListener('click', () => setGanttMode('days', modeDaysBtn));
+}
+if (modeWeeksBtn) {
+    modeWeeksBtn.addEventListener('click', () => setGanttMode('weeks', modeWeeksBtn));
+}
+if (modeMonthsBtn) {
+    modeMonthsBtn.addEventListener('click', () => setGanttMode('months', modeMonthsBtn));
+}
+
+// Configurar control de Zoom (Ancho de columnas)
+const ganttZoom = document.getElementById('ganttZoom');
+if (ganttZoom) {
+    ganttZoom.addEventListener('input', () => {
+        GANTT_COL_PX = parseInt(ganttZoom.value) || 44;
+        if (planningModal && planningModal.style.display !== 'none') rebuildGanttDOM();
+    });
+}
+
 if (ganttResetBtn) {
     ganttResetBtn.addEventListener('click', () => {
         if (!confirm('¿Reiniciar el planning? Se perderá la distribución actual.')) return;
@@ -3159,3 +4279,1598 @@ if (exportGanttPdfBtn) {
 if (exportGanttExcelBtn) {
     exportGanttExcelBtn.addEventListener('click', exportGanttToExcel);
 }
+
+// Setup explicit editing for details description
+const detDescriptionEl = document.getElementById('detDescription');
+if (detDescriptionEl) {
+    setupExplicitEdit(detDescriptionEl, (newDescription) => {
+        if (!parsedData) return false;
+        const detCodeEl = document.getElementById('detCode');
+        if (detCodeEl && detCodeEl.textContent) {
+            const rawCode = Object.keys(parsedData.concepts).find(c => c.replace(/#+\s*$/, '') === detCodeEl.textContent);
+            if (rawCode) {
+                const concept = parsedData.concepts[rawCode];
+                if (newDescription !== concept.description) {
+                    concept.description = newDescription;
+                    saveHistoryState();
+                    return true;
+                }
+            }
+        }
+        return false;
+    }, {
+        multiLine: true
+    });
+}
+
+// Setup explicit editing for details title
+const detSummaryEl = document.getElementById('detSummary');
+if (detSummaryEl) {
+    setupExplicitEdit(detSummaryEl, (newSummary) => {
+        if (!parsedData) return false;
+        const detCodeEl = document.getElementById('detCode');
+        if (detCodeEl && detCodeEl.textContent) {
+            const rawCode = Object.keys(parsedData.concepts).find(c => c.replace(/#+\s*$/, '') === detCodeEl.textContent);
+            if (rawCode) {
+                const concept = parsedData.concepts[rawCode];
+                if (newSummary && newSummary !== concept.summary) {
+                    concept.summary = newSummary;
+                    saveHistoryState();
+                    
+                    // Sincronizar en el árbol visual si existe
+                    const treeNodeSummary = document.querySelector(`.tree-node-container[data-code="${rawCode}"] > .tree-node-row > .col-summary`);
+                    if (treeNodeSummary) {
+                        const valEl = treeNodeSummary.querySelector('.editable-val') || treeNodeSummary;
+                        valEl.textContent = newSummary;
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    });
+}
+
+// ==========================================================================
+// Lógica del Banco de Precios Unitarios
+// ==========================================================================
+
+let activePriceFilter = 'all';
+
+// Clasificación de conceptos para el Banco de Precios
+function getConceptCategory(concept) {
+    if (concept.category === 'PARTIDA_NEW' || concept.isNewPartida) return 'partida_new';
+    if (concept.type === 1) return 'mo';
+    if (concept.type === 2) return 'maq';
+    if (concept.type === 3) return 'mat';
+    if (concept.type === 4) return 'sub';
+    
+    const lowerCode = concept.code.toLowerCase();
+    if (lowerCode.startsWith('mo') || lowerCode.includes('mano')) return 'mo';
+    if (lowerCode.startsWith('mq') || lowerCode.startsWith('maq')) return 'maq';
+    if (lowerCode.startsWith('mt') || lowerCode.startsWith('mat')) return 'mat';
+    
+    return 'partida';
+}
+
+// Renderizar la tabla del Banco de Precios Unitarios
+function renderPricesTable() {
+    if (!parsedData) return;
+
+    const tbody = document.getElementById('pricesTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    // 1. Precalcular mapa de usos ("Dónde se usa")
+    const whereUsed = {};
+    Object.values(parsedData.concepts).forEach(c => {
+        if (Array.isArray(c.decomposition)) {
+            c.decomposition.forEach(item => {
+                if (!whereUsed[item.code]) {
+                    whereUsed[item.code] = [];
+                }
+                if (!whereUsed[item.code].includes(c.code)) {
+                    whereUsed[item.code].push(c.code);
+                }
+            });
+        }
+    });
+
+    // 2. Filtrar conceptos que son precios unitarios o recursos elementales
+    const searchVal = document.getElementById('pricesSearch') ? document.getElementById('pricesSearch').value.toLowerCase().trim() : '';
+
+    const filtered = Object.values(parsedData.concepts).filter(concept => {
+        // Excluir capítulos estructurales
+        if (concept.code.endsWith('#')) return false;
+        // Requerir unidad o precio para calificar como precio unitario
+        if (!concept.unit && !concept.price) return false;
+
+        // Filtro por categoría (Pestañas)
+        const cat = getConceptCategory(concept);
+        if (activePriceFilter !== 'all' && cat !== activePriceFilter) return false;
+
+        // Filtro por búsqueda
+        if (searchVal) {
+            const matchesCode = concept.code.toLowerCase().includes(searchVal);
+            const matchesSummary = (concept.summary || '').toLowerCase().includes(searchVal);
+            const matchesDesc = (concept.description || '').toLowerCase().includes(searchVal);
+            if (!matchesCode && !matchesSummary && !matchesDesc) return false;
+        }
+
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 24px;">No se encontraron precios unitarios para el filtro aplicado.</td></tr>`;
+        return;
+    }
+
+    filtered.forEach(concept => {
+        const row = document.createElement('tr');
+        row.className = 'price-row';
+        row.dataset.code = concept.code;
+
+        const cat = getConceptCategory(concept);
+        let badgeClass = 'badge-partida';
+        let catText = 'Partida';
+        if (cat === 'mo') { badgeClass = 'badge-mo'; catText = 'Mano de Obra'; }
+        else if (cat === 'mat') { badgeClass = 'badge-mat'; catText = 'Material'; }
+        else if (cat === 'maq') { badgeClass = 'badge-maq'; catText = 'Maquinaria'; }
+        else if (cat === 'sub') { badgeClass = 'badge-sub'; catText = 'Subcontrata'; }
+        else if (cat === 'partida_new') { badgeClass = 'badge-partida-new'; catText = 'Nueva Partida'; }
+
+        const uses = whereUsed[concept.code] || [];
+        const usesCount = uses.length;
+
+        // Crear celdas programáticamente
+        const tdCode = document.createElement('td');
+        tdCode.innerHTML = `<span class="code-badge">${concept.code.replace(/#+\s*$/, '')}</span>`;
+
+        const tdType = document.createElement('td');
+        tdType.innerHTML = `<span class="badge-type ${badgeClass}">${catText}</span>`;
+
+        const tdUnit = document.createElement('td');
+        tdUnit.className = 'edit-unit';
+        tdUnit.textContent = concept.unit || '';
+        setupExplicitEdit(tdUnit, (newVal) => {
+            if (concept.unit !== newVal) {
+                concept.unit = newVal;
+                saveHistoryState();
+                
+                // Sincronizar en el árbol visual si existe
+                const treeNodeUnit = document.querySelector(`.tree-node-container[data-code="${concept.code}"] > .tree-node-row > .col-unit`);
+                if (treeNodeUnit) {
+                    const valEl = treeNodeUnit.querySelector('.editable-val') || treeNodeUnit;
+                    valEl.textContent = newVal;
+                }
+                return true;
+            }
+            return false;
+        });
+
+        const tdSummary = document.createElement('td');
+        tdSummary.className = 'edit-summary';
+        tdSummary.textContent = concept.summary || '';
+        setupExplicitEdit(tdSummary, (newVal) => {
+            if (concept.summary !== newVal) {
+                concept.summary = newVal;
+                saveHistoryState();
+
+                // Sincronizar árbol y detalles
+                const treeNodeSummary = document.querySelector(`.tree-node-container[data-code="${concept.code}"] > .tree-node-row > .col-summary`);
+                if (treeNodeSummary) {
+                    const valEl = treeNodeSummary.querySelector('.editable-val') || treeNodeSummary;
+                    valEl.textContent = newVal;
+                }
+
+                const detCodeEl = document.getElementById('detCode');
+                const detSummaryEl = document.getElementById('detSummary');
+                if (detCodeEl && detSummaryEl && detCodeEl.textContent === concept.code.replace(/#+\s*$/, '')) {
+                    const valEl = detSummaryEl.querySelector('.editable-val') || detSummaryEl;
+                    valEl.textContent = newVal;
+                }
+                return true;
+            }
+            return false;
+        });
+
+        const tdUsage = document.createElement('td');
+        tdUsage.style.textAlign = 'center';
+        const usageBtn = document.createElement('button');
+        usageBtn.type = 'button';
+        usageBtn.className = 'usage-badge';
+        usageBtn.textContent = usesCount;
+        usageBtn.title = 'Ver partidas que usan este recurso';
+        usageBtn.addEventListener('click', () => {
+            showUsageModal(concept.code, uses);
+        });
+        tdUsage.appendChild(usageBtn);
+
+        const tdPrice = document.createElement('td');
+        tdPrice.className = 'edit-price';
+        tdPrice.style.textAlign = 'right';
+        tdPrice.style.fontWeight = '600';
+        tdPrice.textContent = parseFloat(concept.price || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        setupExplicitEdit(tdPrice, (newPriceText) => {
+            const rawText = newPriceText.trim().replace(',', '.');
+            const newVal = parseFloat(rawText);
+            if (!isNaN(newVal) && newVal >= 0) {
+                if (parseFloat(concept.price) !== newVal) {
+                    concept.price = newVal;
+                    concept.isManualPrice = true;
+                    
+                    recalculateAll();
+                    updateTotalBudgetDisplay();
+                    saveHistoryState();
+                    
+                    // Actualizar árbol si es visible
+                    const treeNodePrice = document.querySelector(`.tree-node-container[data-code="${concept.code}"] > .tree-node-row > .col-price`);
+                    if (treeNodePrice) {
+                        const valEl = treeNodePrice.querySelector('.editable-val') || treeNodePrice;
+                        valEl.textContent = newVal.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
+                    }
+
+                    // Sincronizar panel de detalles si coincide
+                    const detCodeEl = document.getElementById('detCode');
+                    const detPriceEl = document.getElementById('detPrice');
+                    if (detCodeEl && detPriceEl && detCodeEl.textContent === concept.code.replace(/#+\s*$/, '')) {
+                        detPriceEl.textContent = newVal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
+                    }
+
+                    // Mantener posición del scroll al re-renderizar tabla de precios
+                    const scrollPos = document.querySelector('.prices-table-container').scrollTop;
+                    renderPricesTable();
+                    document.querySelector('.prices-table-container').scrollTop = scrollPos;
+                    return true;
+                }
+            }
+            tdPrice.textContent = parseFloat(concept.price || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return false;
+        }, {
+            isNumeric: true
+        });
+
+        const tdActions = document.createElement('td');
+        const descBtn = document.createElement('button');
+        descBtn.type = 'button';
+        descBtn.className = 'desc-toggle-btn';
+        descBtn.textContent = '📝';
+        descBtn.title = 'Editar texto explicativo';
+        descBtn.addEventListener('click', () => {
+            toggleDescriptionRow(row, concept);
+        });
+        tdActions.appendChild(descBtn);
+
+        row.appendChild(tdCode);
+        row.appendChild(tdType);
+        row.appendChild(tdUnit);
+        row.appendChild(tdSummary);
+        row.appendChild(tdUsage);
+        row.appendChild(tdPrice);
+        row.appendChild(tdActions);
+
+        tbody.appendChild(row);
+    });
+}
+
+// Desplegar fila de descripción extendida
+function toggleDescriptionRow(parentRow, concept) {
+    const nextRow = parentRow.nextElementSibling;
+    if (nextRow && nextRow.classList.contains('description-row')) {
+        nextRow.remove();
+        return;
+    }
+
+    const descRow = document.createElement('tr');
+    descRow.className = 'description-row';
+    descRow.innerHTML = `
+        <td colspan="7">
+            <div class="prices-desc-editor">
+                <div class="prices-desc-title">Descripción / Texto Explicativo (${concept.code})</div>
+                <div class="prices-desc-content">
+                    ${(concept.description || concept.summary || '').replace(/\n/g, '<br>')}
+                </div>
+            </div>
+        </td>
+    `;
+
+    const editor = descRow.querySelector('.prices-desc-content');
+    setupExplicitEdit(editor, (newDesc) => {
+        if (newDesc !== concept.description) {
+            concept.description = newDesc;
+            saveHistoryState();
+
+            // Sincronizar el panel de detalles si coincide
+            const detCodeEl = document.getElementById('detCode');
+            const detDescEl = document.getElementById('detDescription');
+            if (detCodeEl && detDescEl && detCodeEl.textContent === concept.code.replace(/#+\s*$/, '')) {
+                const valEl = detDescEl.querySelector('.editable-val') || detDescEl;
+                valEl.innerHTML = newDesc.replace(/\n/g, '<br>');
+            }
+            return true;
+        }
+        return false;
+    }, {
+        multiLine: true
+    });
+
+    parentRow.after(descRow);
+}
+
+// Mostrar el Modal de "Dónde se usa" (Impact Analysis)
+function showUsageModal(code, parentCodes) {
+    const modal = document.getElementById('usageModal');
+    const body = document.getElementById('usageModalBody');
+    if (!modal || !body) return;
+
+    body.innerHTML = '';
+    
+    if (parentCodes.length === 0) {
+        body.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-muted); text-align: center; margin: 24px 0;">Este recurso no se utiliza en ninguna partida compuesta del presupuesto.</p>`;
+        modal.style.display = 'block';
+        return;
+    }
+
+    const titleInfo = document.createElement('p');
+    titleInfo.style.fontSize = '0.85rem';
+    titleInfo.style.marginBottom = '12px';
+    titleInfo.style.color = 'var(--text-secondary)';
+    titleInfo.innerHTML = `El recurso <strong>${code}</strong> se utiliza en las siguientes <strong>${parentCodes.length}</strong> partidas. Haz clic en cualquiera para navegar a ella:`;
+    body.appendChild(titleInfo);
+
+    const list = document.createElement('ul');
+    list.className = 'usage-list';
+
+    parentCodes.forEach(pCode => {
+        const parent = parsedData.concepts[pCode];
+        if (!parent) return;
+
+        const li = document.createElement('li');
+        li.className = 'usage-item';
+        
+        // Calcular la aportación (si figura en la descomposición de la partida)
+        let factor = 0;
+        if (Array.isArray(parent.decomposition)) {
+            const match = parent.decomposition.find(d => d.code === code);
+            if (match) factor = parseFloat(match.factor) || 0;
+        }
+
+        li.innerHTML = `
+            <div class="usage-item-details">
+                <div class="usage-item-header">
+                    <span class="code-badge" style="font-size: 0.72rem; padding: 2px 6px;">${pCode.replace(/#+\s*$/, '')}</span>
+                    <span class="usage-item-title">${parent.summary}</span>
+                </div>
+                <span class="usage-item-subtitle">Cantidad en partida: ${factor.toLocaleString('es-ES')} ${parent.unit}</span>
+            </div>
+            <div class="usage-item-contribution">
+                ${(factor * parseFloat(parsedData.concepts[code].price || 0)).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+            </div>
+        `;
+
+        li.addEventListener('click', () => {
+            // Cerrar modal
+            modal.style.display = 'none';
+            // Cambiar a vista Presupuesto (Árbol)
+            const presupuestoBtn = document.getElementById('presupuestoBtn');
+            if (presupuestoBtn) presupuestoBtn.click();
+            // Mostrar detalles de la partida
+            showDetails(pCode);
+            // Hacer scroll hasta el nodo del árbol correspondiente
+            const nodeContainer = document.querySelector(`.tree-node-container[data-code="${pCode}"]`);
+            if (nodeContainer) {
+                nodeContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Resaltar brevemente la partida
+                const row = nodeContainer.querySelector('.tree-node-row');
+                if (row) {
+                    row.style.transition = 'background-color 0.3s';
+                    const origBg = row.style.backgroundColor;
+                    row.style.backgroundColor = 'var(--accent-glow, rgba(59, 130, 246, 0.15))';
+                    setTimeout(() => {
+                        row.style.backgroundColor = origBg;
+                    }, 2000);
+                }
+            }
+        });
+
+        list.appendChild(li);
+    });
+
+    body.appendChild(list);
+    modal.style.display = 'block';
+}
+
+// Configurar listeners de navegación y controles del Banco de Precios
+const pricesBtn = document.getElementById('pricesBtn');
+const pricesPanel = document.getElementById('pricesPanel');
+const treePanel = document.getElementById('treePanel');
+const detailsPanel = document.getElementById('detailsPanel');
+const pricesSearch = document.getElementById('pricesSearch');
+
+if (pricesBtn && pricesPanel) {
+    pricesBtn.addEventListener('click', () => {
+        // Ocultar Dashboard
+        if (treePanel) treePanel.style.display = 'none';
+        if (detailsPanel) detailsPanel.style.display = 'none';
+        // Mostrar Precios
+        pricesPanel.style.display = 'flex';
+
+        // Estilo de botones activos
+        document.querySelectorAll('.control-container button').forEach(b => b.classList.remove('active'));
+        pricesBtn.classList.add('active');
+
+        // Renderizar tabla
+        renderPricesTable();
+    });
+}
+
+const presupuestoBtn = document.getElementById('presupuestoBtn');
+if (presupuestoBtn) {
+    presupuestoBtn.addEventListener('click', () => {
+        // Mostrar Dashboard (árbol y detalles) y ocultar Precios
+        if (treePanel) treePanel.style.display = 'flex';
+        if (detailsPanel) detailsPanel.style.display = 'flex';
+        if (pricesPanel) pricesPanel.style.display = 'none';
+
+        // Estilo de botones activos
+        document.querySelectorAll('.control-container button').forEach(b => b.classList.remove('active'));
+        presupuestoBtn.classList.add('active');
+    });
+}
+
+
+
+// Búsqueda en tiempo real
+if (pricesSearch) {
+    pricesSearch.addEventListener('input', () => {
+        renderPricesTable();
+    });
+}
+
+// Filtros de categoría por pestañas
+document.querySelectorAll('.prices-tabs .tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.prices-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activePriceFilter = btn.dataset.filter;
+        renderPricesTable();
+    });
+});
+
+// Cerrar modal de usos
+const closeUsageBtn = document.getElementById('closeUsageBtn');
+const usageModal = document.getElementById('usageModal');
+if (closeUsageBtn && usageModal) {
+    closeUsageBtn.addEventListener('click', () => {
+        usageModal.style.display = 'none';
+    });
+    usageModal.addEventListener('click', (e) => {
+        if (e.target === usageModal) usageModal.style.display = 'none';
+    });
+}
+
+// =============================================================================
+// FEATURE 3: Dependencias Gantt (Fin → Inicio)
+// =============================================================================
+let ganttDeps = []; // [{from: taskId, to: taskId}]
+let ganttLinkMode = false;
+let ganttLinkSource = null; // taskId de la tarea origen seleccionada
+
+// ── Guardar/cargar deps junto al estado del Gantt ──
+const _origGanttSave = ganttSave;
+ganttSave = function() {
+    try {
+        localStorage.setItem(ganttStorageKey(), JSON.stringify({
+            startDate: ganttStartDate.toISOString(),
+            totalWeeks: ganttTotalWeeks,
+            state: ganttState,
+            deps: ganttDeps
+        }));
+    } catch(e) {}
+};
+const _origGanttLoad = ganttLoad;
+ganttLoad = function() {
+    try {
+        const raw = localStorage.getItem(ganttStorageKey());
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        if (saved.startDate) ganttStartDate = new Date(saved.startDate);
+        if (saved.totalWeeks) ganttTotalWeeks = saved.totalWeeks;
+        if (saved.state) ganttState = saved.state;
+        if (saved.deps) ganttDeps = saved.deps;
+        return true;
+    } catch(e) { return false; }
+};
+
+// ── Propagar dependencias en cadena (Fin→Inicio) ──
+function applyDependencies() {
+    if (!ganttDeps || ganttDeps.length === 0) return;
+    // Hasta 10 pasadas para resolver cadenas largas
+    for (let pass = 0; pass < 10; pass++) {
+        let changed = false;
+        ganttDeps.forEach(dep => {
+            const fromSt = ganttState[dep.from];
+            const toSt   = ganttState[dep.to];
+            if (!fromSt || !toSt) return;
+            const minStart = fromSt.startWeek + fromSt.durationWeeks;
+            if (toSt.startWeek < minStart) {
+                toSt.startWeek = minStart;
+                changed = true;
+            }
+        });
+        if (!changed) break;
+    }
+}
+
+// ── Dibujar flechas de dependencia en SVG ──
+function drawDependencyArrows(bodyWrap, colsCount) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    let depSvg = bodyWrap.querySelector('.gantt-dep-svg');
+    if (depSvg) {
+        depSvg.innerHTML = '';
+    } else {
+        depSvg = document.createElementNS(svgNS, 'svg');
+        depSvg.setAttribute('class', 'gantt-dep-svg gantt-svg-overlay');
+        depSvg.style.width  = (colsCount * GANTT_COL_PX) + 'px';
+        depSvg.style.pointerEvents = 'all';
+        bodyWrap.appendChild(depSvg);
+    }
+    depSvg.style.width = (colsCount * GANTT_COL_PX) + 'px';
+
+    if (!ganttDeps || ganttDeps.length === 0) return;
+
+    // Definir marcador de flecha
+    const defs   = document.createElementNS(svgNS, 'defs');
+    const marker = document.createElementNS(svgNS, 'marker');
+    marker.setAttribute('id', 'depArrow');
+    marker.setAttribute('markerWidth', '8');
+    marker.setAttribute('markerHeight', '8');
+    marker.setAttribute('refX', '6');
+    marker.setAttribute('refY', '3');
+    marker.setAttribute('orient', 'auto');
+    const poly = document.createElementNS(svgNS, 'polygon');
+    poly.setAttribute('points', '0 0, 6 3, 0 6');
+    poly.setAttribute('class', 'gantt-dep-arrowhead');
+    marker.appendChild(poly);
+    defs.appendChild(marker);
+    depSvg.appendChild(defs);
+
+    ganttDeps.forEach(dep => {
+        const fromSt = ganttState[dep.from];
+        const toSt   = ganttState[dep.to];
+        if (!fromSt || !toSt) return;
+
+        const fromIdx = getRenderedRowIndex(dep.from);
+        const toIdx   = getRenderedRowIndex(dep.to);
+        if (fromIdx < 0 || toIdx < 0) return;
+
+        const ROW_H = 34;
+        const fromCoords = getGanttBarCoords(fromSt);
+        const toCoords   = getGanttBarCoords(toSt);
+
+        const xA = fromCoords.left + fromCoords.width;
+        const yA = fromIdx * ROW_H + ROW_H / 2;
+        const xB = toCoords.left;
+        const yB = toIdx   * ROW_H + ROW_H / 2;
+
+        const xMid = xA + Math.max(10, (xB - xA) / 2);
+        const d = `M ${xA} ${yA} C ${xMid} ${yA}, ${xMid} ${yB}, ${xB} ${yB}`;
+
+        const group = document.createElementNS(svgNS, 'g');
+        group.setAttribute('class', 'gantt-dep-group');
+
+        // Línea invisible más gruesa para hit-area
+        const hit = document.createElementNS(svgNS, 'path');
+        hit.setAttribute('d', d);
+        hit.setAttribute('class', 'gantt-dep-hit-area');
+
+        // Línea visible
+        const path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('class', 'gantt-dep-arrow');
+        path.setAttribute('marker-end', 'url(#depArrow)');
+
+        // Botón circular de eliminar (×) en el punto medio
+        const cx = (xA + xB) / 2;
+        const cy = (yA + yB) / 2;
+
+        const delGroup = document.createElementNS(svgNS, 'g');
+        delGroup.setAttribute('class', 'gantt-dep-delete-btn');
+        delGroup.style.cursor = 'pointer';
+
+        const circle = document.createElementNS(svgNS, 'circle');
+        circle.setAttribute('cx', cx);
+        circle.setAttribute('cy', cy);
+        circle.setAttribute('r', '7');
+        circle.setAttribute('fill', '#ef4444');
+        circle.setAttribute('stroke', '#ffffff');
+        circle.setAttribute('stroke-width', '1');
+
+        const text = document.createElementNS(svgNS, 'text');
+        text.setAttribute('x', cx);
+        text.setAttribute('y', cy);
+        text.setAttribute('dy', '3');
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('fill', '#ffffff');
+        text.setAttribute('font-size', '9');
+        text.setAttribute('font-weight', 'bold');
+        text.textContent = '×';
+
+        const title = document.createElementNS(svgNS, 'title');
+        title.textContent = 'Eliminar esta dependencia';
+        delGroup.appendChild(title);
+
+        delGroup.appendChild(circle);
+        delGroup.appendChild(text);
+
+        delGroup.addEventListener('click', e => {
+            e.stopPropagation();
+            if (confirm('¿Eliminar esta dependencia de enlace?')) {
+                ganttDeps = ganttDeps.filter(d => !(d.from === dep.from && d.to === dep.to));
+                ganttSave();
+                rebuildGanttDOM();
+            }
+        });
+
+        group.appendChild(hit);
+        group.appendChild(path);
+        group.appendChild(delGroup);
+
+        depSvg.appendChild(group);
+    });
+}
+
+// Helper: índice de fila renderizada de una tarea
+function getRenderedRowIndex(taskId) {
+    let idx = 0;
+    for (const task of ganttTasks) {
+        if (isTaskHidden(task)) continue;
+        if (task.id === taskId) return idx;
+        idx++;
+    }
+    return -1;
+}
+
+function isTaskHidden(task) {
+    if (!task.parentId) return false;
+    const pSt = ganttState[task.parentId];
+    if (pSt && pSt.collapsed) return true;
+    const parent = ganttTasks.find(t => t.id === task.parentId);
+    return parent ? isTaskHidden(parent) : false;
+}
+
+// ── Mostrar/ocultar banner de enlace ──
+function showGanttLinkBanner(htmlText) {
+    let banner = document.getElementById('ganttLinkBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'ganttLinkBanner';
+        banner.className = 'gantt-link-banner';
+        const container = document.getElementById('ganttContainer');
+        if (container && container.parentNode) {
+            container.parentNode.insertBefore(banner, container);
+        }
+    }
+    if (banner) {
+        banner.innerHTML = `<span>${htmlText}</span>`;
+        banner.style.display = 'flex';
+    }
+}
+
+function hideGanttLinkBanner() {
+    const banner = document.getElementById('ganttLinkBanner');
+    if (banner) banner.style.display = 'none';
+}
+
+// ── Botón Enlazar ──
+const ganttLinkBtn = document.getElementById('ganttLinkBtn');
+if (ganttLinkBtn) {
+    ganttLinkBtn.addEventListener('click', () => {
+        ganttLinkMode = !ganttLinkMode;
+        ganttLinkSource = null;
+        ganttLinkBtn.classList.toggle('active', ganttLinkMode);
+        document.body.classList.toggle('gantt-link-mode', ganttLinkMode);
+
+        document.querySelectorAll('.gantt-bar.dep-source').forEach(el => el.classList.remove('dep-source'));
+
+        if (ganttLinkMode) {
+            showGanttLinkBanner("🔗 <strong>Modo enlace activo</strong>: Seleccione la tarea predecesora (Fin) haciendo clic en su barra.");
+        } else {
+            hideGanttLinkBanner();
+        }
+    });
+}
+
+// ── Manejar clicks en modo enlace ──
+function handleLinkModeClick(taskId, bar) {
+    if (!ganttLinkMode) return;
+    const taskObj = ganttTasks.find(t => t.id === taskId);
+    if (!taskObj || taskObj.hasKids) return;
+
+    if (!ganttLinkSource) {
+        ganttLinkSource = taskId;
+        bar.classList.add('dep-source');
+        showGanttLinkBanner(`🔗 Seleccione ahora la tarea sucesora (Inicio) para enlazarla con <strong>${taskObj.summary}</strong>, o pulse Enlazar para cancelar.`);
+    } else {
+        if (ganttLinkSource === taskId) {
+            ganttLinkSource = null;
+            document.querySelectorAll('.gantt-bar.dep-source').forEach(el => el.classList.remove('dep-source'));
+            showGanttLinkBanner("🔗 Seleccione la tarea predecesora (Fin) haciendo clic en su barra.");
+            return;
+        }
+        const exists = ganttDeps.some(d => d.from === ganttLinkSource && d.to === taskId);
+        if (!exists) {
+            if (ganttDeps.some(d => d.from === taskId && d.to === ganttLinkSource)) {
+                alert("Error: No se pueden crear enlaces cíclicos.");
+                return;
+            }
+            ganttDeps.push({ from: ganttLinkSource, to: taskId });
+            applyDependencies();
+            recalculateParentTasks();
+            recalculateParentProgress();
+            ganttSave();
+        }
+        ganttLinkSource = null;
+        document.querySelectorAll('.gantt-bar.dep-source').forEach(el => el.classList.remove('dep-source'));
+        showGanttLinkBanner("Enlace creado con éxito. Seleccione otra tarea predecesora (Fin) o pulse Enlazar para terminar.");
+        rebuildGanttDOM();
+    }
+}
+
+
+// ── Integrar en rebuildGanttDOM: aplicar deps y dibujar flechas ──
+// Sobreescribimos stopGanttDrag para incluir applyDependencies
+const _origStopGanttDrag = stopGanttDrag;
+stopGanttDrag = function() {
+    if (!ganttDrag) return;
+    recalculateParentTasks();
+    applyDependencies();
+    recalculateParentProgress();
+    ganttSave();
+    ganttDrag = null;
+    document.removeEventListener('mousemove', doGanttDrag);
+    document.removeEventListener('mouseup', stopGanttDrag);
+    rebuildGanttDOM();
+};
+
+// Inyectar drawDependencyArrows al final de rebuildGanttDOM
+// Lo hacemos interceptando la función existente
+const _origRebuildGanttDOM = rebuildGanttDOM;
+rebuildGanttDOM = function() {
+    applyDependencies();
+    _origRebuildGanttDOM();
+    // Dibujar flechas tras el rebuild
+    const bw = document.querySelector('#ganttContainer .gantt-body');
+    if (bw) {
+        let colsCount = ganttTotalWeeks;
+        if (ganttViewMode === 'days') colsCount = ganttTotalWeeks * 7;
+        else if (ganttViewMode === 'months') colsCount = Math.ceil(ganttTotalWeeks / 4);
+        drawDependencyArrows(bw, colsCount);
+    }
+};
+
+// =============================================================================
+// FEATURE 4: Curva S de Avance Económico
+// =============================================================================
+function calculateSCurve() {
+    if (!ganttTasks || ganttTasks.length === 0) return { labels: [], planned: [], executed: [] };
+
+    const totalWeeks = ganttTotalWeeks;
+    const planned  = new Array(totalWeeks).fill(0);
+    const executed = new Array(totalWeeks).fill(0);
+
+    // Solo tareas hoja (sin hijos) contribuyen directamente
+    const leaves = ganttTasks.filter(t => !t.hasKids);
+
+    leaves.forEach(task => {
+        const st = ganttState[task.id];
+        if (!st || !task.price) return;
+        const cost = task.price;
+        const prog = (st.progress || 0) / 100;
+        const start = Math.max(0, st.startWeek - 1); // 0-indexed
+        const dur   = Math.max(1, st.durationWeeks);
+        const costPerWeek = cost / dur;
+
+        for (let w = 0; w < dur; w++) {
+            const idx = start + w;
+            if (idx < totalWeeks) {
+                planned[idx]  += costPerWeek;
+                executed[idx] += costPerWeek * prog;
+            }
+        }
+    });
+
+    // Acumular
+    const plannedAcc  = [];
+    const executedAcc = [];
+    let sumP = 0, sumE = 0;
+    const labels = [];
+    for (let w = 0; w < totalWeeks; w++) {
+        sumP += planned[w];
+        sumE += executed[w];
+        plannedAcc.push(Math.round(sumP * 100) / 100);
+        executedAcc.push(Math.round(sumE * 100) / 100);
+        const d = new Date(ganttStartDate);
+        d.setDate(d.getDate() + w * 7);
+        labels.push(`S${w + 1}`);
+    }
+
+    return { labels, planned: plannedAcc, executed: executedAcc };
+}
+
+// Integrar la Curva S en renderCharts
+const _origRenderCharts = renderCharts;
+renderCharts = function() {
+    _origRenderCharts();
+
+    // Destruir instancia previa si existe
+    if (window.sCurveChartInstance) {
+        try { window.sCurveChartInstance.destroy(); } catch(e) {}
+        window.sCurveChartInstance = null;
+    }
+
+    const ctx = document.getElementById('sCurveChart');
+    if (!ctx) return;
+
+    const { labels, planned, executed } = calculateSCurve();
+    if (labels.length === 0) return;
+
+    const isDark = document.body.classList.contains('dark-theme');
+    const labelColor = isDark ? '#e2e8f0' : '#1e293b';
+    const gridColor  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+
+    // Mostrar solo cada N semanas en el eje X para no saturar
+    const maxLabels = 26;
+    const step = Math.max(1, Math.ceil(labels.length / maxLabels));
+    const filteredLabels = labels.map((l, i) => i % step === 0 ? l : '');
+
+    window.sCurveChartInstance = new Chart(ctx.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: filteredLabels,
+            datasets: [
+                {
+                    label: 'Planificado (€)',
+                    data: planned,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59,130,246,0.08)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    borderWidth: 2.5
+                },
+                {
+                    label: 'Ejecutado (€)',
+                    data: executed,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16,185,129,0.08)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    borderWidth: 2.5,
+                    borderDash: [],
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: labelColor } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            const v = ctx.parsed.y;
+                            return ` ${ctx.dataset.label}: ${v.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €`;
+                        },
+                        afterBody: (items) => {
+                            if (items.length < 2) return '';
+                            const pl = items[0].parsed.y || 0;
+                            const ex = items[1].parsed.y || 0;
+                            const pct = pl > 0 ? ((ex / pl) * 100).toFixed(1) : '0.0';
+                            const dev = ex - pl;
+                            const devStr = (dev >= 0 ? '+' : '') + dev.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
+                            return [`Avance real: ${pct}%`, `Desviación: ${devStr}`];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { ticks: { color: labelColor, maxRotation: 0 }, grid: { color: gridColor } },
+                y: {
+                    ticks: {
+                        color: labelColor,
+                        callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'k€' : v + '€'
+                    },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+};
+
+// =============================================================================
+// FEATURE 5: Buscador Global (Ctrl+F)
+// =============================================================================
+let gsMatches = [];
+let gsActiveIdx = -1;
+
+function openGlobalSearch() {
+    const bar = document.getElementById('globalSearchBar');
+    if (!bar) return;
+    bar.style.display = 'flex';
+    const input = document.getElementById('globalSearchInput');
+    if (input) { input.value = ''; input.focus(); }
+    gsMatches = []; gsActiveIdx = -1;
+    updateGSCount();
+}
+
+function closeGlobalSearch() {
+    const bar = document.getElementById('globalSearchBar');
+    if (bar) bar.style.display = 'none';
+    clearGSHighlights();
+    gsMatches = []; gsActiveIdx = -1;
+}
+
+function clearGSHighlights() {
+    document.querySelectorAll('.search-highlight, .search-highlight--active').forEach(el => {
+        // Restore original text (strip <mark> tags)
+        el.querySelectorAll('mark').forEach(m => {
+            const t = document.createTextNode(m.textContent);
+            m.replaceWith(t);
+        });
+        el.classList.remove('search-highlight', 'search-highlight--active');
+    });
+}
+
+function performGlobalSearch(term) {
+    clearGSHighlights();
+    gsMatches = []; gsActiveIdx = -1;
+
+    if (!term || term.length < 2) { updateGSCount(); return; }
+
+    const lower = term.toLowerCase();
+    const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+
+    // Buscar en todas las filas de la tabla del árbol
+    const rows = document.querySelectorAll('#treeContent tr, #treeContent .tree-row');
+    rows.forEach(row => {
+        // Buscar en celdas de texto (código y summary)
+        const cells = row.querySelectorAll('td, .tree-cell');
+        let matched = false;
+        cells.forEach(cell => {
+            if (cell.querySelector('button, input, select')) return; // Saltar celdas de control
+            if (cell.textContent.toLowerCase().includes(lower)) {
+                // Resaltar el texto coincidente dentro de nodos de texto
+                highlightTextInEl(cell, re);
+                matched = true;
+            }
+        });
+        if (matched) {
+            row.classList.add('search-highlight');
+            gsMatches.push(row);
+        }
+    });
+
+    updateGSCount();
+    if (gsMatches.length > 0) navigateGS(1); // Ir al primero
+}
+
+function highlightTextInEl(el, re) {
+    // Solo procesar nodos de texto directos e hijos no-element
+    el.childNodes.forEach(node => {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+            const span = document.createElement('span');
+            span.innerHTML = node.textContent.replace(re, m => `<mark>${m}</mark>`);
+            node.replaceWith(span);
+        } else if (node.nodeType === Node.ELEMENT_NODE && !['BUTTON','INPUT','SELECT','MARK'].includes(node.tagName)) {
+            highlightTextInEl(node, re);
+        }
+    });
+}
+
+function navigateGS(dir) {
+    if (gsMatches.length === 0) return;
+
+    // Quitar clase activa anterior
+    if (gsActiveIdx >= 0 && gsMatches[gsActiveIdx]) {
+        gsMatches[gsActiveIdx].classList.remove('search-highlight--active');
+    }
+
+    gsActiveIdx = (gsActiveIdx + dir + gsMatches.length) % gsMatches.length;
+
+    const active = gsMatches[gsActiveIdx];
+    if (active) {
+        active.classList.add('search-highlight--active');
+        active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    updateGSCount();
+}
+
+function updateGSCount() {
+    const el = document.getElementById('globalSearchCount');
+    if (!el) return;
+    if (gsMatches.length === 0) {
+        el.textContent = 'Sin resultados';
+        el.style.color = 'var(--text-secondary)';
+    } else {
+        el.textContent = `${gsActiveIdx + 1} de ${gsMatches.length}`;
+        el.style.color = 'var(--accent, #3b82f6)';
+    }
+    const prev = document.getElementById('globalSearchPrev');
+    const next = document.getElementById('globalSearchNext');
+    if (prev) prev.disabled = gsMatches.length === 0;
+    if (next) next.disabled = gsMatches.length === 0;
+}
+
+// ── Atajos de teclado ──
+document.addEventListener('keydown', e => {
+    // Ctrl+F / Cmd+F
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        const bar = document.getElementById('globalSearchBar');
+        // Solo activar cuando el árbol de presupuesto es visible
+        const treeContent = document.getElementById('treeContent');
+        if (treeContent && treeContent.offsetParent !== null) {
+            e.preventDefault();
+            if (bar && bar.style.display === 'none') {
+                openGlobalSearch();
+            } else {
+                document.getElementById('globalSearchInput')?.focus();
+            }
+        }
+    }
+    // Escape para cerrar buscador o modo enlace
+    if (e.key === 'Escape') {
+        const bar = document.getElementById('globalSearchBar');
+        if (bar && bar.style.display !== 'none') {
+            closeGlobalSearch();
+        }
+        if (ganttLinkMode) {
+            ganttLinkMode = false;
+            ganttLinkSource = null;
+            if (ganttLinkBtn) ganttLinkBtn.classList.remove('active');
+            document.body.classList.remove('gantt-link-mode');
+            document.querySelectorAll('.gantt-bar.dep-source').forEach(el => el.classList.remove('dep-source'));
+            hideGanttLinkBanner();
+        }
+    }
+});
+
+// ── Eventos de la barra ──
+const gsInput = document.getElementById('globalSearchInput');
+if (gsInput) {
+    let gsTimer;
+    gsInput.addEventListener('input', () => {
+        clearTimeout(gsTimer);
+        gsTimer = setTimeout(() => performGlobalSearch(gsInput.value.trim()), 250);
+    });
+    gsInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            navigateGS(e.shiftKey ? -1 : 1);
+        }
+    });
+}
+
+const gsPrev  = document.getElementById('globalSearchPrev');
+const gsNext  = document.getElementById('globalSearchNext');
+const gsClose = document.getElementById('globalSearchClose');
+if (gsPrev)  gsPrev.addEventListener('click',  () => navigateGS(-1));
+if (gsNext)  gsNext.addEventListener('click',  () => navigateGS(1));
+if (gsClose) gsClose.addEventListener('click', () => closeGlobalSearch());
+
+// =============================================================================
+// Lógica para Añadir Nueva Partida
+// =============================================================================
+const addPartidaBtn = document.getElementById('addPartidaBtn');
+const addPartidaModal = document.getElementById('addPartidaModal');
+const closeAddPartidaBtn = document.getElementById('closeAddPartidaBtn');
+const cancelAddPartidaBtn = document.getElementById('cancelAddPartidaBtn');
+const addPartidaForm = document.getElementById('addPartidaForm');
+
+if (addPartidaBtn && addPartidaModal) {
+    addPartidaBtn.addEventListener('click', () => {
+        const parentCode = addPartidaBtn.dataset.parentCode;
+        if (!parentCode) return;
+        const parentConcept = parsedData.concepts[parentCode];
+        if (!parentConcept) return;
+
+        // Mostrar nombre del capítulo destino
+        const parentDisplay = document.getElementById('addPartidaParentDisplay');
+        if (parentDisplay) {
+            parentDisplay.value = `${parentCode.replace(/#+\s*$/, '')} - ${parentConcept.summary || ''}`;
+        }
+
+        // Abrir modal
+        addPartidaModal.style.display = 'flex';
+        
+        // Resetear y enfocar el primer input
+        if (addPartidaForm) addPartidaForm.reset();
+        setTimeout(() => {
+            document.getElementById('addPartidaSummary')?.focus();
+        }, 100);
+    });
+}
+
+function closeAddPartidaModal() {
+    if (addPartidaModal) {
+        addPartidaModal.style.display = 'none';
+    }
+}
+
+if (closeAddPartidaBtn) closeAddPartidaBtn.addEventListener('click', closeAddPartidaModal);
+if (cancelAddPartidaBtn) cancelAddPartidaBtn.addEventListener('click', closeAddPartidaModal);
+if (addPartidaModal) {
+    addPartidaModal.addEventListener('click', (e) => {
+        if (e.target === addPartidaModal) closeAddPartidaModal();
+    });
+}
+
+if (addPartidaForm) {
+    addPartidaForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const parentCode = addPartidaBtn.dataset.parentCode;
+        const summary = document.getElementById('addPartidaSummary').value.trim();
+        const qty = parseFloat(document.getElementById('addPartidaQty').value) || 0;
+        const price = parseFloat(document.getElementById('addPartidaPrice').value) || 0;
+
+        if (!parentCode || !summary) return;
+
+        const parentConcept = parsedData.concepts[parentCode];
+        if (!parentConcept) return;
+
+        // Auto-generación de código (ej: 01.02.new1)
+        const parentCodeClean = parentCode.replace(/#+\s*$/, '');
+        let count = 1;
+        let newCode = `${parentCodeClean}.new${count}`;
+        while (parsedData.concepts[newCode]) {
+            count++;
+            newCode = `${parentCodeClean}.new${count}`;
+        }
+
+        // 1. Crear el objeto concepto
+        parsedData.concepts[newCode] = {
+            code: newCode,
+            unit: 'ud',
+            summary: summary,
+            price: price,
+            description: '',
+            decomposition: [],
+            measurements: [],
+            category: 'PARTIDA_NEW',
+            isNewPartida: true
+        };
+
+        // 2. Asociar como hijo en la descomposición del padre
+        if (!Array.isArray(parentConcept.decomposition)) {
+            parentConcept.decomposition = [];
+        }
+        parentConcept.decomposition.push({
+            code: newCode,
+            factor: qty,
+            type: 4 // Generic subcontrato / simple item
+        });
+
+        // Si el padre tiene el array children auxiliar, sincronizar
+        if (Array.isArray(parentConcept.children)) {
+            parentConcept.children.push(newCode);
+        }
+
+        // Forzar recálculo
+        parentConcept.isManualPrice = false;
+        
+        recalculateAll();
+        saveHistoryState();
+        closeAddPartidaModal();
+
+        // Renderizar el árbol y seleccionar el nuevo elemento
+        renderCurrentLevel();
+        showDetails(newCode);
+        updateTotalBudgetDisplay();
+        
+        // Enfocar el elemento recién creado en el árbol para dar feedback visual
+        setTimeout(() => {
+            const nodeContainer = document.querySelector(`.tree-node-container[data-code="${newCode}"]`);
+            if (nodeContainer) {
+                nodeContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const row = nodeContainer.querySelector('.tree-node-row');
+                if (row) {
+                    row.classList.add('active');
+                    row.style.transition = 'background-color 0.3s';
+                    const origBg = row.style.backgroundColor;
+                    row.style.backgroundColor = 'var(--accent-glow, rgba(59, 130, 246, 0.15))';
+                    setTimeout(() => {
+                        row.style.backgroundColor = origBg;
+                    }, 2000);
+                }
+            }
+        }, 300);
+    });
+}
+
+
+// =============================================================================
+// Helper Functions for Inline Draft Partida Creation in the Tree
+// =============================================================================
+
+function createDraftNodeRow(depth) {
+    const row = document.createElement('div');
+    row.className = 'tree-node-row draft-node-row';
+    row.style.backgroundColor = 'var(--accent-glow, rgba(59, 130, 246, 0.08))';
+    row.style.borderLeft = '4px solid var(--accent, #3b82f6)';
+    row.style.display = 'grid';
+    row.style.alignItems = 'center';
+    row.style.minHeight = '38px';
+    
+    if (window.columnWidths && window.columnWidths.length >= 5) {
+        const w = window.columnWidths;
+        row.style.gridTemplateColumns = `${w[0]}px ${w[1]}px 1fr ${w[2]}px ${w[3]}px ${w[4]}px`;
+    } else {
+        row.style.gridTemplateColumns = '160px 50px 1fr 100px 100px 120px';
+    }
+
+    // 1. Column: Code (contains arrows and OK checkmark)
+    const colCode = document.createElement('div');
+    colCode.className = 'col-code';
+    colCode.style.paddingLeft = (depth * 20 + 8) + 'px';
+    colCode.style.display = 'flex';
+    colCode.style.alignItems = 'center';
+    colCode.style.gap = '4px';
+
+    // Arrow and OK buttons wrapper
+    const btnWrapper = document.createElement('div');
+    btnWrapper.style.display = 'inline-flex';
+    btnWrapper.style.alignItems = 'center';
+    btnWrapper.style.gap = '2px';
+
+    // Arrow Left button
+    const btnLeft = document.createElement('button');
+    btnLeft.type = 'button';
+    btnLeft.innerHTML = '◀';
+    btnLeft.className = 'draft-nav-btn';
+    btnLeft.title = 'Subir de nivel (extraer)';
+    btnLeft.style.cssText = 'background:none; border:none; cursor:pointer; font-size:11px; padding:2px; color:var(--text-secondary); font-weight:bold;';
+    btnLeft.onclick = (e) => { e.stopPropagation(); moveDraftLeft(); };
+
+    // Arrow Up button
+    const btnUp = document.createElement('button');
+    btnUp.type = 'button';
+    btnUp.innerHTML = '▲';
+    btnUp.className = 'draft-nav-btn';
+    btnUp.title = 'Mover Arriba';
+    btnUp.style.cssText = 'background:none; border:none; cursor:pointer; font-size:11px; padding:2px; color:var(--text-secondary); font-weight:bold;';
+    btnUp.onclick = (e) => { e.stopPropagation(); moveDraftUp(); };
+
+    // Arrow Down button
+    const btnDown = document.createElement('button');
+    btnDown.type = 'button';
+    btnDown.innerHTML = '▼';
+    btnDown.className = 'draft-nav-btn';
+    btnDown.title = 'Mover Abajo';
+    btnDown.style.cssText = 'background:none; border:none; cursor:pointer; font-size:11px; padding:2px; color:var(--text-secondary); font-weight:bold;';
+    btnDown.onclick = (e) => { e.stopPropagation(); moveDraftDown(); };
+
+    // Arrow Right button
+    const btnRight = document.createElement('button');
+    btnRight.type = 'button';
+    btnRight.innerHTML = '▶';
+    btnRight.className = 'draft-nav-btn';
+    btnRight.title = 'Bajar de nivel (anidar)';
+    btnRight.style.cssText = 'background:none; border:none; cursor:pointer; font-size:11px; padding:2px; color:var(--text-secondary); font-weight:bold;';
+    btnRight.onclick = (e) => { e.stopPropagation(); moveDraftRight(); };
+
+    // OK Button
+    const btnConfirm = document.createElement('button');
+    btnConfirm.type = 'button';
+    btnConfirm.innerHTML = '✔️';
+    btnConfirm.className = 'draft-confirm-btn';
+    btnConfirm.title = 'Confirmar y Guardar Partida';
+    btnConfirm.style.cssText = 'background:var(--success, #10b981); border:none; border-radius:4px; color:white; font-size:10px; cursor:pointer; padding:3px 6px; font-weight:bold; margin-left: 4px;';
+    btnConfirm.onclick = (e) => { e.stopPropagation(); confirmDraftPartida(); };
+
+    btnWrapper.appendChild(btnLeft);
+    btnWrapper.appendChild(btnUp);
+    btnWrapper.appendChild(btnDown);
+    btnWrapper.appendChild(btnRight);
+    btnWrapper.appendChild(btnConfirm);
+
+    colCode.appendChild(btnWrapper);
+
+    // 2. Column: Unit
+    const colUnit = document.createElement('div');
+    colUnit.className = 'col-unit';
+    const inputUnit = document.createElement('input');
+    inputUnit.type = 'text';
+    inputUnit.value = draftNode.unit || 'ud';
+    inputUnit.style.cssText = 'width:90%; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; font-size:12px; background:var(--bg-color); color:var(--text-primary); outline:none; text-align:center;';
+    inputUnit.oninput = (e) => { draftNode.unit = e.target.value; };
+    colUnit.appendChild(inputUnit);
+
+    // 3. Column: Summary
+    const colSummary = document.createElement('div');
+    colSummary.className = 'col-summary';
+    colSummary.style.display = 'flex';
+    colSummary.style.alignItems = 'center';
+    const inputSummary = document.createElement('input');
+    inputSummary.type = 'text';
+    inputSummary.id = 'draftInputSummary';
+    inputSummary.placeholder = 'Resumen de la nueva partida (obligatorio)';
+    inputSummary.value = draftNode.summary || '';
+    inputSummary.style.cssText = 'width:98%; padding:3px 6px; border:1px solid var(--border-color); border-radius:4px; font-size:12px; background:var(--bg-color); color:var(--text-primary); outline:none;';
+    inputSummary.oninput = (e) => { 
+        draftNode.summary = e.target.value; 
+        e.target.style.borderColor = ''; // clear error
+    };
+    colSummary.appendChild(inputSummary);
+
+    // 4. Column: Quantity
+    const colQty = document.createElement('div');
+    colQty.className = 'col-quantity';
+    const inputQty = document.createElement('input');
+    inputQty.type = 'number';
+    inputQty.id = 'draftInputQty';
+    inputQty.placeholder = '0.00';
+    inputQty.step = 'any';
+    inputQty.value = draftNode.qty || '';
+    inputQty.style.cssText = 'width:90%; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; font-size:12px; background:var(--bg-color); color:var(--text-primary); outline:none; text-align:right;';
+    inputQty.oninput = (e) => {
+        draftNode.qty = e.target.value;
+        e.target.style.borderColor = '';
+        updateDraftImporte();
+    };
+    colQty.appendChild(inputQty);
+
+    // 5. Column: Price
+    const colPrice = document.createElement('div');
+    colPrice.className = 'col-price';
+    const inputPrice = document.createElement('input');
+    inputPrice.type = 'number';
+    inputPrice.id = 'draftInputPrice';
+    inputPrice.placeholder = '0.00';
+    inputPrice.step = 'any';
+    inputPrice.value = draftNode.price || '';
+    inputPrice.style.cssText = 'width:90%; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; font-size:12px; background:var(--bg-color); color:var(--text-primary); outline:none; text-align:right;';
+    inputPrice.oninput = (e) => {
+        draftNode.price = e.target.value;
+        e.target.style.borderColor = '';
+        updateDraftImporte();
+    };
+    colPrice.appendChild(inputPrice);
+
+    // 6. Column: Amount (calculated automatically)
+    const colAmount = document.createElement('div');
+    colAmount.className = 'col-amount';
+    colAmount.id = 'draftDisplayAmount';
+    colAmount.style.textAlign = 'right';
+    colAmount.style.fontWeight = 'bold';
+    colAmount.style.fontSize = '12px';
+    colAmount.style.paddingRight = '8px';
+    
+    const qVal = parseFloat(draftNode.qty);
+    const pVal = parseFloat(draftNode.price);
+    if (!isNaN(qVal) && !isNaN(pVal)) {
+        colAmount.textContent = (qVal * pVal).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    } else {
+        colAmount.textContent = '0,00 €';
+    }
+
+    row.appendChild(colCode);
+    row.appendChild(colUnit);
+    row.appendChild(colSummary);
+    row.appendChild(colQty);
+    row.appendChild(colPrice);
+    row.appendChild(colAmount);
+
+    function updateDraftImporte() {
+        const display = row.querySelector('#draftDisplayAmount');
+        if (display) {
+            const q = parseFloat(draftNode.qty);
+            const p = parseFloat(draftNode.price);
+            if (!isNaN(q) && !isNaN(p)) {
+                display.textContent = (q * p).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+            } else {
+                display.textContent = '0,00 €';
+            }
+        }
+    }
+
+    return row;
+}
+
+function confirmDraftPartida() {
+    const summaryInput = document.getElementById('draftInputSummary');
+    const qtyInput = document.getElementById('draftInputQty');
+    const priceInput = document.getElementById('draftInputPrice');
+
+    const summary = (draftNode.summary || '').trim();
+    const qty = parseFloat(draftNode.qty);
+    const price = parseFloat(draftNode.price);
+
+    let hasError = false;
+
+    if (!summary) {
+        if (summaryInput) summaryInput.style.borderColor = '#ef4444';
+        hasError = true;
+    }
+    if (isNaN(qty) || qty < 0) {
+        if (qtyInput) qtyInput.style.borderColor = '#ef4444';
+        hasError = true;
+    }
+    if (isNaN(price) || price < 0) {
+        if (priceInput) priceInput.style.borderColor = '#ef4444';
+        hasError = true;
+    }
+
+    if (hasError) {
+        alert("Por favor, rellene todos los campos obligatorios resaltados en rojo con valores válidos.");
+        return;
+    }
+
+    // Auto-generate code based on parent
+    let parentCode = draftNode.parentCode;
+    let newCode = '';
+
+    if (parentCode === null) {
+        // Root node
+        let count = 1;
+        newCode = `${String(count).padStart(2, '0')}#`;
+        while (parsedData.concepts[newCode]) {
+            count++;
+            newCode = `${String(count).padStart(2, '0')}#`;
+        }
+        
+        // Add to roots
+        if (Array.isArray(parsedData.root_nodes)) {
+            parsedData.root_nodes.splice(draftNode.index, 0, newCode);
+        } else {
+            parsedData.root_nodes = Object.values(parsedData.root_nodes);
+            parsedData.root_nodes.splice(draftNode.index, 0, newCode);
+        }
+    } else {
+        const parentConcept = parsedData.concepts[parentCode];
+        if (!parentConcept) return;
+
+        const parentCodeClean = parentCode.replace(/#+\s*$/, '');
+        let count = 1;
+        newCode = `${parentCodeClean}.${String(count).padStart(2, '0')}`;
+        while (parsedData.concepts[newCode]) {
+            count++;
+            newCode = `${parentCodeClean}.${String(count).padStart(2, '0')}`;
+        }
+
+        // Add to parent decomposition
+        if (!Array.isArray(parentConcept.decomposition)) {
+            parentConcept.decomposition = [];
+        }
+        parentConcept.decomposition.splice(draftNode.index, 0, {
+            code: newCode,
+            factor: qty,
+            type: 4 // Subcontract / Simple node
+        });
+
+        if (Array.isArray(parentConcept.children)) {
+            parentConcept.children.push(newCode);
+        }
+
+        parentConcept.isManualPrice = false;
+    }
+
+    // Create new concept
+    parsedData.concepts[newCode] = {
+        code: newCode,
+        unit: draftNode.unit || 'ud',
+        summary: summary,
+        price: price,
+        description: '',
+        decomposition: [],
+        measurements: [],
+        category: 'PARTIDA_NEW',
+        isNewPartida: true
+    };
+
+    // Recalculate, save history, hide draft
+    recalculateAll();
+    saveHistoryState();
+    
+    draftActive = false;
+    
+    // Clear draft fields
+    draftNode.summary = '';
+    draftNode.qty = '';
+    draftNode.price = '';
+    draftNode.unit = 'ud';
+
+    renderCurrentLevel();
+    updateTotalBudgetDisplay();
+
+    // Highlight and focus newly created node
+    setTimeout(() => {
+        const nodeContainer = document.querySelector(`.tree-node-container[data-code="${newCode}"]`);
+        if (nodeContainer) {
+            nodeContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const row = nodeContainer.querySelector('.tree-node-row');
+            if (row) {
+                row.classList.add('active');
+                row.style.transition = 'background-color 0.3s';
+                const origBg = row.style.backgroundColor;
+                row.style.backgroundColor = 'var(--accent-glow, rgba(59, 130, 246, 0.15))';
+                setTimeout(() => {
+                    row.style.backgroundColor = origBg;
+                }, 2000);
+            }
+        }
+    }, 300);
+}
+
+function getParentConceptCode(childCode) {
+    for (const concept of Object.values(parsedData.concepts)) {
+        if (Array.isArray(concept.decomposition)) {
+            if (concept.decomposition.some(item => item.code === childCode)) {
+                return concept.code;
+            }
+        }
+        if (Array.isArray(concept.children)) {
+            if (concept.children.includes(childCode)) {
+                return concept.code;
+            }
+        }
+    }
+    return null;
+}
+
+function getSiblingCodes(parentCode) {
+    if (parentCode === null) {
+        return Array.isArray(parsedData.root_nodes) ? parsedData.root_nodes : Object.values(parsedData.root_nodes);
+    }
+    const parentConcept = parsedData.concepts[parentCode];
+    if (!parentConcept) return [];
+    return getConceptDecomposition(parentConcept).map(item => item.code);
+}
+
+function moveDraftUp() {
+    if (draftNode.index > 0) {
+        draftNode.index--;
+        renderCurrentLevel();
+    }
+}
+
+function moveDraftDown() {
+    const siblings = getSiblingCodes(draftNode.parentCode);
+    if (draftNode.index < siblings.length) {
+        draftNode.index++;
+        renderCurrentLevel();
+    }
+}
+
+function moveDraftLeft() {
+    if (draftNode.parentCode !== null) {
+        const parentCode = draftNode.parentCode;
+        const parentParentCode = getParentConceptCode(parentCode);
+        const parentSiblings = getSiblingCodes(parentParentCode);
+        const parentIndex = parentSiblings.indexOf(parentCode);
+        
+        draftNode.parentCode = parentParentCode;
+        draftNode.depth = Math.max(0, draftNode.depth - 1);
+        draftNode.index = parentIndex >= 0 ? parentIndex + 1 : 0;
+        renderCurrentLevel();
+    }
+}
+
+function moveDraftRight() {
+    const siblings = getSiblingCodes(draftNode.parentCode);
+    if (draftNode.index > 0) {
+        const siblingAboveCode = siblings[draftNode.index - 1];
+        const siblingAbove = parsedData.concepts[siblingAboveCode];
+        if (siblingAbove) {
+            draftNode.parentCode = siblingAboveCode;
+            draftNode.depth = draftNode.depth + 1;
+            const newSiblings = getSiblingCodes(siblingAboveCode);
+            draftNode.index = newSiblings.length;
+            renderCurrentLevel();
+        }
+    }
+}
+
+
+

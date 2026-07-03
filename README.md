@@ -1,4 +1,4 @@
-﻿# BC3 Viewer — Visualizador Premium de Presupuestos BC3
+# BC3 Viewer — Visualizador Premium de Presupuestos BC3
 
 Visualizador web avanzado de archivos BC3 (FIEBDC-3) para presupuestos de construccion.
 **Mejora libre y gratuita para cualquier Arquitecto Tecnico, Arquitecto o profesional de la construccion by JMC.**
@@ -183,6 +183,31 @@ php -S localhost:8080
 - **Chart.js** - Dashboard visual
 
 Todas las librerias JS se sirven **localmente**, sin dependencia de CDN externos.
+
+---
+
+## Historial de Versiones
+
+### Version 1.1.0 — 03/07/2026 (Actual)
+* **Creacion de Partidas en el Arbol:** Boton "➕ Nueva Partida" en el encabezado de la columna Codigo para crear filas borrador directamente en el arbol visual.
+* **Control Jerarquico de Posicionamiento:** Botonera de direccion (▲/▼/◀/▶) para mover el borrador en altura o profundidad (anidar dentro de capitulos).
+* **Validacion y Resaltado:** Validacion obligatoria de Resumen, Cantidad y Precio con bordes de error rojos en inputs e importe calculado en tiempo real.
+* **Gantt - Enlaces y Dependencias:** Boton "🔗 Enlazar" para crear dependencias Fin→Inicio de forma interactiva entre tareas con propagacion de retrasos.
+* **Gantt - Borrado Rapido de Enlaces:** Boton circular rojo "×" en el centro de cada flecha de dependencia para eliminarlas mediante clic izquierdo directo.
+* **Buscador Global:** Barra flotante (Ctrl+F) con busqueda incremental, resaltados amarillos/azules en el arbol y navegacion arriba/abajo.
+* **Curva S en Dashboard:** Grafica interactiva acumulada para comparar planificacion teorica y ejecucion real semana a semana.
+* **Banco de Precios:** Pestaña "NUEVAS PARTIDAS" para filtrar y editar en caliente los nuevos conceptos basicos y exportacion BC3 conforme.
+
+### Version 1.0.0 — 03/07/2026
+* **Rediseno del Header:** Reorganizacion de la cabecera en secciones funcionales de control (Visualizacion, Operaciones, Comparacion, Exportacion).
+* **Tarjetas PEM y PEC:** Rediseño visual de presupuestos con etiquetas e importes destacados.
+* **Informacion y Versiones:** Menu de informacion (ℹ️) lateral con el historial desplegable de versiones.
+* **Dashboard Tecnico:** 6 graficas de distribucion de costes y KPIs clave.
+* **Gantt Premium:** Calculo de ruta critica, linea visual de "Hoy" y control de avance financiero global y detallado.
+
+### Version 0.1.0 — 10/12/2025 (Inicial)
+* **Lanzamiento original:** Visualizador jerarquico de archivos BC3 en forma de arbol.
+* **Buscador y Columnas:** Busqueda local de partidas, mediciones detalladas (~M) y descripciones extendidas (~T).
 
 ---
 
