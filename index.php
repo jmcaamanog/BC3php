@@ -54,20 +54,20 @@ header("Pragma: no-cache");
 
                     <!-- Grupo 3: Herramientas Auxiliares -->
                     <div class="control-container tools-group" id="toolsGroup" style="display:none;">
-                        <button type="button" id="dashboardBtn" class="tool-btn" data-icon="bar-chart-3">Dashboard</button>
-                        <button type="button" id="planningBtn" class="tool-btn" data-icon="calendar-days">Planning</button>
+                        <button type="button" id="dashboardBtn" class="tool-btn">📊 DASHBOARD</button>
+                        <button type="button" id="planningBtn" class="tool-btn">📅 PLANNING</button>
                         <button type="button" id="certObrasBtn" class="tool-btn">🏗️ CERTIF.</button>
                         <button type="button" id="compareBtn" class="tool-btn">🔍 COMPARAR</button>
                     </div>
 
                     <!-- Grupo 4: Guardar y Exportar -->
                     <div class="control-container export-group" id="exportGroup" style="display:none;">
-                        <button type="button" id="saveBtn" class="save-btn" style="display:none;" data-icon="download">Guardar</button>
+                        <button type="button" id="saveBtn" class="save-btn" style="display:none;">💾 GUARDAR</button>
                         <div class="dropdown" id="exportDropdown">
-                            <button type="button" class="export-btn dropdown-toggle" data-icon="download" data-trailing-icon="chevron-down">Exportar</button>
+                            <button type="button" class="export-btn dropdown-toggle">📤 EXPORTAR ▾</button>
                             <div class="dropdown-content">
-                                <button type="button" id="exportPdfBtn" data-icon="file-text">Exportar a PDF</button>
-                                <button type="button" id="exportExcelBtn" data-icon="file-spreadsheet">Exportar a Excel</button>
+                                <button type="button" id="exportPdfBtn">📄 EXPORTAR A PDF</button>
+                                <button type="button" id="exportExcelBtn">📊 EXPORTAR A EXCEL</button>
                                 <button type="button" id="exportBc3Btn" style="color: #059669; font-weight: 600;">⬇ GUARDAR COMO BC3</button>
                             </div>
                         </div>
@@ -78,11 +78,11 @@ header("Pragma: no-cache");
             <!-- Botones del extremo derecho: Menú Ajustes (Engranaje) -->
             <div class="right-controls">
                 <div class="dropdown" id="settingsDropdown">
-                    <button type="button" class="settings-toggle-btn" id="settingsBtn" aria-label="Ajustes" title="Ajustes" data-icon-only="settings"></button>
+                    <button type="button" class="settings-toggle-btn" id="settingsBtn" aria-label="Ajustes" title="Ajustes">⚙️</button>
                     <div class="dropdown-content dropdown-content-right" style="right: 0; left: auto; min-width: 160px;">
-                        <button type="button" id="toggleCoeffsBtn" style="display:none; justify-content:flex-start; gap:8px; width:100%; border:none; background:none; text-align:left; padding:8px 12px; cursor:pointer;" data-icon="settings">Coeficientes</button>
+                        <button type="button" id="toggleCoeffsBtn" style="display:none; justify-content:flex-start; gap:8px; width:100%; border:none; background:none; text-align:left; padding:8px 12px; cursor:pointer;"><span style="font-size:1rem;">⚙️</span> Coeficientes</button>
                         <button type="button" id="auditLogBtn" style="display:none; justify-content:flex-start; gap:8px; width:100%; border:none; background:none; text-align:left; padding:8px 12px; cursor:pointer;"><span style="font-size:1rem;">📜</span> Auditoría</button>
-                        <button type="button" id="themeToggle" style="display:flex; justify-content:flex-start; gap:8px; width:100%; border:none; background:none; text-align:left; padding:8px 12px; cursor:pointer;" data-icon="moon">Tema Visual</button>
+                        <button type="button" id="themeToggle" style="display:flex; justify-content:flex-start; gap:8px; width:100%; border:none; background:none; text-align:left; padding:8px 12px; cursor:pointer;"><span id="themeToggleIcon" style="font-size:1rem;">🌙</span> Tema Visual</button>
                         <button type="button" id="infoBtn" style="display:flex; justify-content:flex-start; gap:8px; width:100%; border:none; background:none; text-align:left; padding:8px 12px; cursor:pointer;"><span style="font-size:1rem;">ℹ️</span> Información</button>
                     </div>
                 </div>
@@ -456,7 +456,7 @@ header("Pragma: no-cache");
         <div class="modal-content dashboard-modal-content">
             <div class="modal-header">
                 <h3>📊 Dashboard Técnico del Presupuesto</h3>
-                <button type="button" id="closeDashboardBtn" class="close-btn" data-icon-only="x" aria-label="Cerrar dashboard"></button>
+                <button type="button" id="closeDashboardBtn" class="close-btn">✕</button>
             </div>
             <!-- KPI Strip -->
             <div class="db-kpi-strip" id="dbKpiStrip"></div>
@@ -642,7 +642,7 @@ header("Pragma: no-cache");
         <div class="modal-content compare-modal-content">
             <div class="modal-header">
                 <h3>Comparador de Presupuestos</h3>
-                <button type="button" id="closeCompareBtn" class="close-btn" data-icon-only="x" aria-label="Cerrar comparador"></button>
+                <button type="button" id="closeCompareBtn" class="close-btn">✕</button>
             </div>
             <div class="modal-body">
                 <p>Selecciona un segundo archivo <strong>.bc3</strong> para comparar y detectar desviaciones de precios e importes.</p>
@@ -694,11 +694,11 @@ header("Pragma: no-cache");
                     </div>
 
                     <button type="button" id="ganttLinkBtn" class="gantt-action-btn gantt-link-btn" title="Enlazar tareas (dependencia Fin→Inicio)">🔗 Enlazar</button>
-                    <button type="button" id="ganttResetBtn" class="gantt-action-btn" data-icon="rotate-ccw">Reiniciar</button>
-                    <button type="button" id="exportGanttExcelBtn" class="gantt-action-btn gantt-excel-btn" data-icon="file-spreadsheet">Excel</button>
-                    <button type="button" id="exportGanttPdfBtn" class="gantt-action-btn gantt-pdf-btn" data-icon="file-text">PDF</button>
+                    <button type="button" id="ganttResetBtn" class="gantt-action-btn">↺ Reiniciar</button>
+                    <button type="button" id="exportGanttExcelBtn" class="gantt-action-btn gantt-excel-btn">⬇ Excel</button>
+                    <button type="button" id="exportGanttPdfBtn" class="gantt-action-btn gantt-pdf-btn">⬇ PDF</button>
                     <button type="button" id="exportGanttXmlBtn" class="gantt-action-btn gantt-xml-btn" title="Exportar a Microsoft Project (XML)" style="background-color: #2563eb; color: white;">⬇ MS Project XML</button>
-                    <button type="button" id="closePlanningBtn" class="gantt-close-btn" data-icon="x">Cerrar</button>
+                    <button type="button" id="closePlanningBtn" class="gantt-close-btn">✕ Cerrar</button>
                 </div>
             </div>
             <div class="gantt-summary-bar" id="ganttSummaryBar"></div>
