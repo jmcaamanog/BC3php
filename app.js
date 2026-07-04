@@ -983,7 +983,7 @@ function createNode(code, isRoot = false, depth = 0, qty = 1, mobileMode = false
     // Determine if it's a chapter/folder structurally
     // In BC3, codes ending in '#' are typically chapters.
     // Also if it has children, treat as chapter.
-    const isChapter = concept.code.endsWith('#') || hasChildren;
+    const isChapter = concept.code.endsWith('#') || (!concept.unit || concept.unit.trim() === '');
 
     row.className = 'tree-node-row';
     if (window.currentCriticalPath && window.currentCriticalPath.has(code)) {
@@ -1681,7 +1681,7 @@ function showDetails(code) {
     panel.style.display = 'block';
 
     const isRoot = Array.isArray(parsedData.root_nodes) ? parsedData.root_nodes.includes(concept.code) : Object.values(parsedData.root_nodes).includes(concept.code);
-    const isChapter = concept.code.endsWith('#') || (concept.decomposition && concept.decomposition.length > 0) || (concept.children && concept.children.length > 0) || isRoot;
+    const isChapter = concept.code.endsWith('#') || (!concept.unit || concept.unit.trim() === '');
     
     const addPartidaContainer = document.getElementById('addPartidaContainer');
     if (addPartidaContainer) {
