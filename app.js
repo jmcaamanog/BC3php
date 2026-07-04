@@ -48,6 +48,7 @@ document.querySelectorAll('[data-icon], [data-icon-only]').forEach(applyIcon);
 // 1. File Input Change
 const fileInput = document.getElementById('bc3file');
 let currentFileName = "presupuesto.bc3";
+let isProcessingFile = false;
 let draftActive = false;
 let draftNode = {
     parentCode: null,
